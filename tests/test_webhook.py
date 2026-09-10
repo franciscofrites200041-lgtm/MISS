@@ -79,6 +79,14 @@ def test_webhook_fails_closed_when_env_not_set(monkeypatch):
     assert response.status_code == 500
 
 
+def test_health_endpoint_returns_200_without_auth():
+    with TestClient(app) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
 def test_secret_is_verified_before_body_is_parsed(monkeypatch):
     monkeypatch.setenv("WEBHOOK_SECRET", "s3cret")
     with TestClient(app) as client:

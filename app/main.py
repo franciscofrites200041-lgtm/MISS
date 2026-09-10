@@ -57,6 +57,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="MISS", lifespan=lifespan)
 
 
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+
 def verify_webhook_secret(x_webhook_secret: str | None = Header(default=None)) -> None:
     expected = os.environ.get("WEBHOOK_SECRET")
     if not expected:

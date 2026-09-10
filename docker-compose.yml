@@ -5,7 +5,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: miss
+    # STACK_SUFFIX vacío por default = prod. dev pisa via .env.dev.
+    container_name: miss${STACK_SUFFIX:-}
     restart: unless-stopped
     ports:
       - "${API_PORT:-8000}:8000"
@@ -21,3 +22,19 @@ services:
       - TRANSCRIPTION_MODEL=${TRANSCRIPTION_MODEL:-openai/whisper-large-v3-turbo}
       - MISS_SERVICE_USER_ID=${MISS_SERVICE_USER_ID}
       - MISS_NOTE_PREFIX=${MISS_NOTE_PREFIX:-[Transcripción de audio]}
+    networks:
+      - default
+      - proxy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 5s
+
+# proxy es la red externa de nginx-proxy-manager. MISS se une para que NPM lo
+# resuelva por nombre de container (host interno: miss:8000).
+networks:
+  proxy:
+    external: true
+    name: nginx-proxy-manager_default
