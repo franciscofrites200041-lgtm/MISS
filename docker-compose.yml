@@ -5,8 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    # STACK_SUFFIX vacío por default = prod. dev pisa via .env.dev.
-    container_name: miss${STACK_SUFFIX:-}
+    container_name: miss
     restart: unless-stopped
     ports:
       - "${API_PORT:-8000}:8000"
