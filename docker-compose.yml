@@ -21,6 +21,10 @@ services:
       - TRANSCRIPTION_MODEL=${TRANSCRIPTION_MODEL:-openai/whisper-large-v3-turbo}
       - MISS_SERVICE_USER_ID=${MISS_SERVICE_USER_ID}
       - MISS_NOTE_PREFIX=${MISS_NOTE_PREFIX:-[Transcripción de audio]}
+      - RUNS_DB_PATH=${RUNS_DB_PATH:-/app/data/runs.db}
+      - MISS_DASHBOARD_USER=${MISS_DASHBOARD_USER}
+      - MISS_DASHBOARD_PASS=${MISS_DASHBOARD_PASS}
+      - MISS_CORS_ORIGINS=${MISS_CORS_ORIGINS:-}
     networks:
       - default
       - proxy

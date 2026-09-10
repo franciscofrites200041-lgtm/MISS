@@ -10,6 +10,7 @@ from app.attachments import extract_attachment
 from app.contacts import get_contact_by_phone
 from app.models import SpoterWebhookPayload
 from app.spoter import SpoterClient
+from app.storage import RunStore
 from app.transcription import DEFAULT_MODEL, TranscriptionError, transcribe
 
 logger = logging.getLogger("miss.pipeline")
@@ -29,17 +30,44 @@ async def process_webhook(
     http: httpx.AsyncClient,
     spoter: SpoterClient,
     config: PipelineConfig,
+    store: RunStore | None = None,
 ) -> None:
     """Orquesta el flujo completo de MISS para un webhook `transcript_audio`:
-    extraer audio → transcribir → resolver contacto → emitir `agregar_nota`.
-    Todas las fallas se logean; ninguna propaga (sino tumba el background task)."""
+    extraer audio -> transcribir -> resolver contacto -> emitir `agregar_nota`.
+    Todas las fallas se logean; ninguna propaga (sino tumba el background task).
+
+    Si `store` está seteado, persiste cada run con su status y resultado."""
+    target = payload.datos_instancias[0] if payload.datos_instancias else None
+    run_id = None
+    if store is not None:
+        run_id = await store.create(
+            instance_root=payload.instance,
+            sub_instance=target.instance if target else "",
+            phone=target.phone if target else "",
+            event_type=payload.event_type,
+        )
+
+    async def skip(reason: str) -> None:
+        logger.info(reason)
+        if store is not None and run_id is not None:
+            await store.mark_skipped(run_id, reason=reason)
+
+    async def fail(reason: str) -> None:
+        logger.error(reason)
+        if store is not None and run_id is not None:
+            await store.mark_failed(run_id, error_message=reason)
+
     attachment = extract_attachment(payload)
     if attachment is None or attachment.kind != "audio":
-        logger.info("no client audio attachment; skipping")
+        await skip("no client audio attachment")
         return
 
+    if store is not None and run_id is not None:
+        await store.mark_processing(run_id)
+        await store.set_attachment(run_id, kind=attachment.kind, url=attachment.url)
+
     if not config.openrouter_api_key:
-        logger.warning("OPENROUTER_API_KEY not configured; skipping transcription")
+        await skip("OPENROUTER_API_KEY not configured")
         return
 
     try:
@@ -50,15 +78,15 @@ async def process_webhook(
             model=config.transcription_model,
         )
     except TranscriptionError as exc:
-        logger.error("transcription failed: %s", exc)
+        await fail(f"transcription failed: {exc}")
         return
 
     text = transcription.text.strip()
     if not text:
-        logger.warning("transcription returned empty text; skipping emit")
+        await skip("transcription returned empty text")
         return
 
-    target = payload.datos_instancias[0]
+    assert target is not None  # extract_attachment ya verificó que había target
     contact = await get_contact_by_phone(
         spoter,
         mass_url=payload.mass_url,
@@ -70,7 +98,7 @@ async def process_webhook(
     mensaje = f"{config.note_prefix} {text}".strip()
 
     try:
-        await emit_agregar_nota(
+        id_original = await emit_agregar_nota(
             spoter,
             mass_url=payload.mass_url,
             root_instance=payload.instance,
@@ -81,4 +109,15 @@ async def process_webhook(
             nombre_sugerido=name,
         )
     except SpoterMassRejected as exc:
-        logger.error("mass emission failed: %s", exc)
+        await fail(f"mass emission failed: {exc}")
+        return
+
+    if store is not None and run_id is not None:
+        await store.mark_completed(
+            run_id,
+            transcription_text=text,
+            transcription_cost_usd=transcription.cost_usd,
+            transcription_duration_seconds=transcription.duration_seconds,
+            contact_name=name or None,
+            mass_id_original=id_original,
+        )

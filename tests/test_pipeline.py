@@ -208,6 +208,84 @@ async def test_swallows_mass_emission_error():
     assert fake.captured_mass_body is not None  # se intentó
 
 
+async def test_persists_completed_run_with_all_data(tmp_path):
+    from app.storage import RunStore
+
+    fake = FakeSpoter()
+    http, spoter = _wire(fake)
+    store = RunStore(tmp_path / "runs.db")
+    await store.init()
+
+    payload = SpoterWebhookPayload.model_validate(REAL_PAYLOAD)
+    async with http:
+        await process_webhook(
+            payload, http=http, spoter=spoter, config=_config(), store=store,
+        )
+
+    rows = await store.list()
+    assert len(rows) == 1
+    run = rows[0]
+    assert run.status == "completed"
+    assert run.instance_root == "95"
+    assert run.sub_instance == "26434"
+    assert run.phone == "5492615617031"
+    assert run.event_type == "transcript_audio"
+    assert run.attachment_kind == "audio"
+    assert run.attachment_url == "https://hub.spoter.com.ar/audio/1753"
+    assert run.transcription_text == "hola necesito precio de lomos"
+    assert run.transcription_cost_usd == 0.0005
+    assert run.transcription_duration_seconds == 4.2
+    assert run.contact_name == "Ale Del Pozo"
+    assert run.mass_id_original is not None
+
+
+async def test_persists_skipped_run_when_no_audio(tmp_path):
+    from app.storage import RunStore
+
+    fake = FakeSpoter()
+    http, spoter = _wire(fake)
+    store = RunStore(tmp_path / "runs.db")
+    await store.init()
+
+    body = {**REAL_PAYLOAD}
+    body["datos_instancias"] = {
+        **REAL_PAYLOAD["datos_instancias"],
+        "message": {**REAL_PAYLOAD["datos_instancias"]["message"], "tipo": "chat"},
+    }
+    payload = SpoterWebhookPayload.model_validate(body)
+
+    async with http:
+        await process_webhook(
+            payload, http=http, spoter=spoter, config=_config(), store=store,
+        )
+
+    rows = await store.list()
+    assert len(rows) == 1
+    assert rows[0].status == "skipped"
+    assert "no client audio" in (rows[0].error_message or "")
+
+
+async def test_persists_failed_run_when_mass_emission_fails(tmp_path):
+    from app.storage import RunStore
+
+    fake = FakeSpoter()
+    fake.mass_response = {"success": False, "error": "bad"}
+    http, spoter = _wire(fake)
+    store = RunStore(tmp_path / "runs.db")
+    await store.init()
+
+    payload = SpoterWebhookPayload.model_validate(REAL_PAYLOAD)
+    async with http:
+        await process_webhook(
+            payload, http=http, spoter=spoter, config=_config(), store=store,
+        )
+
+    rows = await store.list()
+    assert len(rows) == 1
+    assert rows[0].status == "failed"
+    assert "mass emission" in (rows[0].error_message or "")
+
+
 async def test_audio_bytes_flow_end_to_end():
     fake = FakeSpoter()
     fake.audio_bytes = b"custom audio bytes"
