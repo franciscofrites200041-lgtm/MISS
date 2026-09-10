@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  miss:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: miss
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - ${DATA_DIR:-./data}:/app/data
+    environment:
+      - TZ=America/Argentina/Buenos_Aires
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET}
+      - SPOTER_API_USER=${SPOTER_API_USER}
+      - SPOTER_API_PASS=${SPOTER_API_PASS}
+      - TOKEN_CACHE_PATH=${TOKEN_CACHE_PATH:-/app/data/auth.json}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - TRANSCRIPTION_MODEL=${TRANSCRIPTION_MODEL:-openai/whisper-large-v3-turbo}
+      - MISS_SERVICE_USER_ID=${MISS_SERVICE_USER_ID}
+      - MISS_NOTE_PREFIX=${MISS_NOTE_PREFIX:-[Transcripción de audio]}
