@@ -1,0 +1,26 @@
+# Entornos y secretos
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Node
+node_modules/
+.next/
+
+# Datos locales / runtime
+data/
+*.db
+*.log
+
+# SO / editores
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
