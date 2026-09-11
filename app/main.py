@@ -41,6 +41,25 @@ class _AccessNoiseFilter(logging.Filter):
 logging.getLogger("uvicorn.access").addFilter(_AccessNoiseFilter())
 
 
+# Los loggers de "miss.*" salen a stdout con nivel INFO — así los ve
+# `docker logs` / Portainer. Sin esto, uvicorn deja los INFO no configurados
+# fuera del root logger que tiene handler.
+def _configure_miss_logging() -> None:
+    logger = logging.getLogger("miss")
+    logger.setLevel(logging.INFO)
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter(
+            "%(asctime)s %(levelname)s %(name)s: %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        ))
+        logger.addHandler(handler)
+        logger.propagate = False
+
+
+_configure_miss_logging()
+
+
 # ContextVar propagado al background task: cada request outbound del pipeline
 # se registra en la run activa vía event_hooks del httpx.AsyncClient.
 _current_run: ContextVar[tuple[str, object] | None] = ContextVar(
