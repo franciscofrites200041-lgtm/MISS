@@ -137,23 +137,6 @@ async def test_skips_when_no_audio_attachment():
     assert fake.captured_mass_body is None
 
 
-async def test_skips_when_audio_is_from_business():
-    fake = FakeSpoter()
-    http, spoter = _wire(fake)
-
-    body = {**REAL_PAYLOAD}
-    body["datos_instancias"] = {
-        **REAL_PAYLOAD["datos_instancias"],
-        "message": {**REAL_PAYLOAD["datos_instancias"]["message"], "propio": 1},
-    }
-    payload = SpoterWebhookPayload.model_validate(body)
-
-    async with http:
-        await process_webhook(payload, http=http, spoter=spoter, config=_config())
-
-    assert fake.captured_mass_body is None
-
-
 async def test_skips_transcription_when_api_key_missing():
     fake = FakeSpoter()
     http, spoter = _wire(fake)

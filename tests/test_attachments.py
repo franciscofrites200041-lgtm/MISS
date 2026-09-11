@@ -46,12 +46,6 @@ def test_returns_none_when_message_is_php_empty_array():
     assert result is None
 
 
-def test_returns_none_when_audio_is_from_business():
-    result = extract_attachment(_payload(propio=1))
-
-    assert result is None
-
-
 def test_returns_none_when_tipo_is_chat():
     result = extract_attachment(_payload(tipo="chat"))
 

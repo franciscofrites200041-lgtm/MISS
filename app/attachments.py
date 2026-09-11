@@ -20,8 +20,6 @@ def extract_attachment(payload: SpoterWebhookPayload) -> Attachment | None:
     message = payload.datos_instancias[0].message
     if message is None:
         return None
-    if message.propio:
-        return None
     if message.tipo not in _SUPPORTED_KINDS:
         return None
     if not message.media_url:
