@@ -18,7 +18,6 @@ ENV HOSTNAME=0.0.0.0
 # Next standalone output copia el mínimo runtime.
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
-COPY --from=builder /app/public ./public
 
 EXPOSE 3005
 
