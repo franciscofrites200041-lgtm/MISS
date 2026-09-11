@@ -34,8 +34,7 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  // Todo excepto los estáticos internos de Next. La proxy route /api/tools
-  // también queda protegida porque cualquier llamada viene del navegador ya
-  // autenticado, y el server-to-server ya usa las creds de MISS_API_USER/PASS.
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  // Todo excepto los estáticos internos de Next y /api/health (usado por el
+  // healthcheck del container, no puede pedir credenciales).
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/health).*)"],
 };
