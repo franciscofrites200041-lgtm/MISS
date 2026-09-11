@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Activity, CheckCircle2, Coins, AlertCircle, Clock, Mic } from "lucide-react";
+import { Activity, CheckCircle2, Coins, AlertCircle, Clock, Mic, Image as ImageIcon, FileText } from "lucide-react";
 
 import { fetchMetrics, fetchRuns } from "@/lib/api";
 import type { Run, RunStatus } from "@/lib/types";
@@ -39,6 +39,18 @@ function formatSeconds(v: number | null): string {
 
 function StatusBadge({ status }: { status: RunStatus }) {
   return <span className={`badge badge-${status}`}>{STATUS_LABEL[status]}</span>;
+}
+
+function KindBadge({ kind }: { kind: string | null }) {
+  if (!kind) return <span className="text-slate-500">—</span>;
+  const Icon = kind === "audio" ? Mic : kind === "image" ? ImageIcon : FileText;
+  const label = kind === "audio" ? "Audio" : kind === "image" ? "Imagen" : "Documento";
+  return (
+    <span className="inline-flex items-center gap-1.5 text-slate-300">
+      <Icon className="h-3.5 w-3.5 text-slate-400" />
+      {label}
+    </span>
+  );
 }
 
 function KpiCard({ icon: Icon, label, value, sub }: {
@@ -82,7 +94,7 @@ export default async function DashboardPage() {
             MISS — Dashboard
           </h1>
           <p className="mt-1 text-sm text-slate-400">
-            Transcripciones de audio de Spoter, runs y costos.
+            Transcripciones y descripciones de Spoter, runs y costos.
           </p>
         </div>
       </header>
@@ -131,6 +143,7 @@ export default async function DashboardPage() {
               <thead className="text-xs uppercase text-slate-500">
                 <tr>
                   <th className="px-5 py-3 text-left">Fecha</th>
+                  <th className="px-5 py-3 text-left">Tipo</th>
                   <th className="px-5 py-3 text-left">Instance</th>
                   <th className="px-5 py-3 text-left">Teléfono</th>
                   <th className="px-5 py-3 text-left">Estado</th>
@@ -149,6 +162,9 @@ export default async function DashboardPage() {
                       <Link href={`/runs/${r.id}`} className="hover:text-blue-400">
                         {formatDateTime(r.created_at)}
                       </Link>
+                    </td>
+                    <td className="px-5 py-3 text-sm">
+                      <KindBadge kind={r.attachment_kind} />
                     </td>
                     <td className="px-5 py-3 text-slate-400 font-mono">
                       {r.instance_root}

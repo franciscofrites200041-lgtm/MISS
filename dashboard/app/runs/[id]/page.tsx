@@ -96,7 +96,7 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
 
         {run.transcription_text && (
           <div className="border-t border-white/5 px-5 py-4">
-            <div className="mb-2 text-xs uppercase tracking-wide text-slate-500">Texto transcripto</div>
+            <div className="mb-2 text-xs uppercase tracking-wide text-slate-500">Texto de la nota</div>
             <div className="whitespace-pre-wrap rounded-lg bg-slate-950/50 p-4 text-sm text-slate-100">
               {run.transcription_text}
             </div>
