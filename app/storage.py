@@ -142,6 +142,24 @@ class RunStore:
     async def mark_failed(self, run_id: str, *, error_message: str) -> None:
         await self._patch(run_id, status="failed", error_message=error_message)
 
+    async def save_tool_output(
+        self,
+        run_id: str,
+        *,
+        text: str,
+        cost_usd: float | None,
+        duration_seconds: float | None,
+    ) -> None:
+        """Persiste el resultado del LLM sin cambiar el status. Se llama apenas
+        la tool devuelve texto — así el costo queda contabilizado aunque el
+        POST a Spoter falle después."""
+        await self._patch(
+            run_id,
+            transcription_text=text,
+            transcription_cost_usd=cost_usd,
+            transcription_duration_seconds=duration_seconds,
+        )
+
     async def mark_skipped(self, run_id: str, *, reason: str) -> None:
         await self._patch(run_id, status="skipped", error_message=reason)
 

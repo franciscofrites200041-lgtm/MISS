@@ -111,6 +111,15 @@ async def process_webhook(
         await skip(f"{tool.slug} produced empty text")
         return
 
+    # Persistimos el output ya — el LLM cobró aunque después falle el POST a Spoter.
+    if store is not None and run_id is not None:
+        await store.save_tool_output(
+            run_id,
+            text=note.text,
+            cost_usd=note.cost_usd,
+            duration_seconds=note.duration_seconds,
+        )
+
     assert target is not None  # extract_attachment ya verificó que había target
 
     # Si Spoter mandó el token en el payload, lo usamos y saltamos el login.
