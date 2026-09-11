@@ -35,8 +35,34 @@ services:
       retries: 6
       start_period: 5s
 
-# proxy es la red externa de nginx-proxy-manager. MISS se une para que NPM lo
-# resuelva por nombre de container (host interno: miss:8000).
+  miss-dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: miss-dashboard
+    restart: unless-stopped
+    depends_on:
+      miss:
+        condition: service_healthy
+    environment:
+      - TZ=America/Argentina/Buenos_Aires
+      # El dashboard le habla a MISS por el nombre de container (misma red).
+      - MISS_API_URL=${MISS_API_URL:-http://miss:8000}
+      - MISS_API_USER=${MISS_DASHBOARD_USER}
+      - MISS_API_PASS=${MISS_DASHBOARD_PASS}
+    networks:
+      - default
+      - proxy
+    healthcheck:
+      # Next standalone no trae curl. wget está en la imagen alpine.
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3005/"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+# nginx-proxy-manager_default es la red externa del NPM. Ambos servicios se
+# unen para que NPM los resuelva por nombre: miss:8000 y miss-dashboard:3005.
 networks:
   proxy:
     external: true
