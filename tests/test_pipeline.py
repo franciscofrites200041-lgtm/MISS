@@ -74,19 +74,18 @@ def _config(**overrides):
     defaults = dict(
         openrouter_api_key="sk-or-fake",
         service_user_id="1",
-        note_prefix="[Transcripción de audio]",
     )
     defaults.update(overrides)
     return PipelineConfig(**defaults)
 
 
-async def test_happy_path_hits_every_stage_and_emits_correct_note():
+async def test_happy_path_hits_every_stage_and_emits_correct_note(tools):
     fake = FakeSpoter()
     http, spoter = _wire(fake)
     payload = SpoterWebhookPayload.model_validate(REAL_PAYLOAD)
 
     async with http:
-        await process_webhook(payload, http=http, spoter=spoter, config=_config())
+        await process_webhook(payload, http=http, spoter=spoter, config=_config(), tools=tools)
 
     hit_paths = {(r.url.host, r.url.path) for r in fake.calls}
     assert ("openrouter.ai", "/api/v1/audio/transcriptions") in hit_paths
@@ -105,20 +104,20 @@ async def test_happy_path_hits_every_stage_and_emits_correct_note():
     assert fake.captured_mass_body["data"] == {"instance": "26434"}
 
 
-async def test_emits_with_empty_name_when_contact_not_found():
+async def test_emits_with_empty_name_when_contact_not_found(tools):
     fake = FakeSpoter()
     fake.contact_response = {"success": True, "data": {}}
     http, spoter = _wire(fake)
 
     payload = SpoterWebhookPayload.model_validate(REAL_PAYLOAD)
     async with http:
-        await process_webhook(payload, http=http, spoter=spoter, config=_config())
+        await process_webhook(payload, http=http, spoter=spoter, config=_config(), tools=tools)
 
     action = fake.captured_mass_body["actions"][0]
     assert "nombre_sugerido" not in action
 
 
-async def test_skips_when_no_audio_attachment():
+async def test_skips_when_no_audio_attachment(tools):
     fake = FakeSpoter()
     http, spoter = _wire(fake)
 
@@ -130,14 +129,14 @@ async def test_skips_when_no_audio_attachment():
     payload = SpoterWebhookPayload.model_validate(body)
 
     async with http:
-        await process_webhook(payload, http=http, spoter=spoter, config=_config())
+        await process_webhook(payload, http=http, spoter=spoter, config=_config(), tools=tools)
 
     hit_hosts = {r.url.host for r in fake.calls}
     assert "openrouter.ai" not in hit_hosts
     assert fake.captured_mass_body is None
 
 
-async def test_skips_transcription_when_api_key_missing():
+async def test_skips_transcription_when_api_key_missing(tools):
     fake = FakeSpoter()
     http, spoter = _wire(fake)
     payload = SpoterWebhookPayload.model_validate(REAL_PAYLOAD)
@@ -145,7 +144,7 @@ async def test_skips_transcription_when_api_key_missing():
     async with http:
         await process_webhook(
             payload, http=http, spoter=spoter,
-            config=_config(openrouter_api_key=""),
+            config=_config(openrouter_api_key=""), tools=tools,
         )
 
     hit_hosts = {r.url.host for r in fake.calls}
@@ -153,19 +152,19 @@ async def test_skips_transcription_when_api_key_missing():
     assert fake.captured_mass_body is None
 
 
-async def test_skips_emit_when_transcription_returns_empty_text():
+async def test_skips_emit_when_transcription_returns_empty_text(tools):
     fake = FakeSpoter()
     fake.openrouter_response = {"text": "  ", "usage": {"seconds": 0.1}}
     http, spoter = _wire(fake)
     payload = SpoterWebhookPayload.model_validate(REAL_PAYLOAD)
 
     async with http:
-        await process_webhook(payload, http=http, spoter=spoter, config=_config())
+        await process_webhook(payload, http=http, spoter=spoter, config=_config(), tools=tools)
 
     assert fake.captured_mass_body is None
 
 
-async def test_swallows_transcription_error_without_emitting():
+async def test_swallows_transcription_error_without_emitting(tools):
     fake = FakeSpoter()
     fake.openrouter_status = 500
     fake.openrouter_response = {"error": {"message": "boom"}}
@@ -173,12 +172,12 @@ async def test_swallows_transcription_error_without_emitting():
     payload = SpoterWebhookPayload.model_validate(REAL_PAYLOAD)
 
     async with http:
-        await process_webhook(payload, http=http, spoter=spoter, config=_config())
+        await process_webhook(payload, http=http, spoter=spoter, config=_config(), tools=tools)
 
     assert fake.captured_mass_body is None
 
 
-async def test_swallows_mass_emission_error():
+async def test_swallows_mass_emission_error(tools):
     # Emit falla → NO propaga (para no tumbar el background task).
     fake = FakeSpoter()
     fake.mass_response = {"success": False, "error": "bad"}
@@ -186,12 +185,12 @@ async def test_swallows_mass_emission_error():
     payload = SpoterWebhookPayload.model_validate(REAL_PAYLOAD)
 
     async with http:
-        await process_webhook(payload, http=http, spoter=spoter, config=_config())
+        await process_webhook(payload, http=http, spoter=spoter, config=_config(), tools=tools)
 
     assert fake.captured_mass_body is not None  # se intentó
 
 
-async def test_persists_completed_run_with_all_data(tmp_path):
+async def test_persists_completed_run_with_all_data(tmp_path, tools):
     from app.storage import RunStore
 
     fake = FakeSpoter()
@@ -202,7 +201,7 @@ async def test_persists_completed_run_with_all_data(tmp_path):
     payload = SpoterWebhookPayload.model_validate(REAL_PAYLOAD)
     async with http:
         await process_webhook(
-            payload, http=http, spoter=spoter, config=_config(), store=store,
+            payload, http=http, spoter=spoter, config=_config(), tools=tools, store=store,
         )
 
     rows = await store.list()
@@ -222,7 +221,7 @@ async def test_persists_completed_run_with_all_data(tmp_path):
     assert run.mass_id_original is not None
 
 
-async def test_persists_skipped_run_when_no_audio(tmp_path):
+async def test_persists_skipped_run_when_no_audio(tmp_path, tools):
     from app.storage import RunStore
 
     fake = FakeSpoter()
@@ -239,7 +238,7 @@ async def test_persists_skipped_run_when_no_audio(tmp_path):
 
     async with http:
         await process_webhook(
-            payload, http=http, spoter=spoter, config=_config(), store=store,
+            payload, http=http, spoter=spoter, config=_config(), tools=tools, store=store,
         )
 
     rows = await store.list()
@@ -248,7 +247,7 @@ async def test_persists_skipped_run_when_no_audio(tmp_path):
     assert "no supported attachment" in (rows[0].error_message or "")
 
 
-async def test_persists_failed_run_when_mass_emission_fails(tmp_path):
+async def test_persists_failed_run_when_mass_emission_fails(tmp_path, tools):
     from app.storage import RunStore
 
     fake = FakeSpoter()
@@ -260,7 +259,7 @@ async def test_persists_failed_run_when_mass_emission_fails(tmp_path):
     payload = SpoterWebhookPayload.model_validate(REAL_PAYLOAD)
     async with http:
         await process_webhook(
-            payload, http=http, spoter=spoter, config=_config(), store=store,
+            payload, http=http, spoter=spoter, config=_config(), tools=tools, store=store,
         )
 
     rows = await store.list()
@@ -309,7 +308,7 @@ def _payload_with(message):
     return SpoterWebhookPayload.model_validate(body)
 
 
-async def test_image_event_calls_chat_and_emits_note_with_image_prefix():
+async def test_image_event_calls_chat_and_emits_note_with_image_prefix(tools):
     fake = FakeSpoterMulti()
     http, spoter = _wire(fake)
     payload = _payload_with({
@@ -318,7 +317,7 @@ async def test_image_event_calls_chat_and_emits_note_with_image_prefix():
     })
 
     async with http:
-        await process_webhook(payload, http=http, spoter=spoter, config=_config())
+        await process_webhook(payload, http=http, spoter=spoter, config=_config(), tools=tools)
 
     hit_paths = {(r.url.host, r.url.path) for r in fake.calls}
     assert ("openrouter.ai", "/api/v1/chat/completions") in hit_paths
@@ -330,7 +329,7 @@ async def test_image_event_calls_chat_and_emits_note_with_image_prefix():
     assert "Presupuesto por $50.000" in action["mensaje_nota"]
 
 
-async def test_document_pdf_with_extractable_text_skips_vision(monkeypatch):
+async def test_document_pdf_with_extractable_text_skips_vision(monkeypatch, tools):
     # Forzamos que pypdf devuelva texto suficiente → NO se envía el PDF binario.
     from app import describe as describe_mod
     monkeypatch.setattr(
@@ -346,7 +345,7 @@ async def test_document_pdf_with_extractable_text_skips_vision(monkeypatch):
     })
 
     async with http:
-        await process_webhook(payload, http=http, spoter=spoter, config=_config())
+        await process_webhook(payload, http=http, spoter=spoter, config=_config(), tools=tools)
 
     chat_reqs = [r for r in fake.calls if r.url.path == "/api/v1/chat/completions"]
     assert len(chat_reqs) == 1
@@ -359,7 +358,7 @@ async def test_document_pdf_with_extractable_text_skips_vision(monkeypatch):
     assert action["mensaje_nota"].startswith("[Resumen de documento] ")
 
 
-async def test_document_pdf_without_text_falls_back_to_vision(monkeypatch):
+async def test_document_pdf_without_text_falls_back_to_vision(monkeypatch, tools):
     from app import describe as describe_mod
     monkeypatch.setattr(describe_mod, "_try_extract_pdf_text", lambda raw: "")
 
@@ -371,7 +370,7 @@ async def test_document_pdf_without_text_falls_back_to_vision(monkeypatch):
     })
 
     async with http:
-        await process_webhook(payload, http=http, spoter=spoter, config=_config())
+        await process_webhook(payload, http=http, spoter=spoter, config=_config(), tools=tools)
 
     chat_reqs = [r for r in fake.calls if r.url.path == "/api/v1/chat/completions"]
     assert len(chat_reqs) == 1
@@ -381,14 +380,14 @@ async def test_document_pdf_without_text_falls_back_to_vision(monkeypatch):
     assert any(part["type"] == "file" for part in content)
 
 
-async def test_audio_bytes_flow_end_to_end():
+async def test_audio_bytes_flow_end_to_end(tools):
     fake = FakeSpoter()
     fake.audio_bytes = b"custom audio bytes"
     http, spoter = _wire(fake)
     payload = SpoterWebhookPayload.model_validate(REAL_PAYLOAD)
 
     async with http:
-        await process_webhook(payload, http=http, spoter=spoter, config=_config())
+        await process_webhook(payload, http=http, spoter=spoter, config=_config(), tools=tools)
 
     openrouter_req = [r for r in fake.calls if r.url.host == "openrouter.ai"][0]
     body = json.loads(openrouter_req.content)

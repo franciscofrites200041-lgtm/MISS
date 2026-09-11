@@ -141,12 +141,19 @@ class RunStore:
         limit: int = 50,
         offset: int = 0,
         status: str | None = None,
+        kind: str | None = None,
     ) -> list[Run]:
         query = "SELECT * FROM runs"
+        wheres = []
         params: list = []
         if status:
-            query += " WHERE status = ?"
+            wheres.append("status = ?")
             params.append(status)
+        if kind:
+            wheres.append("attachment_kind = ?")
+            params.append(kind)
+        if wheres:
+            query += " WHERE " + " AND ".join(wheres)
         query += " ORDER BY created_at DESC, ROWID DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
 
@@ -182,3 +189,29 @@ class RunStore:
             summary["total_cost_usd"] += cost or 0
             summary["total_duration_seconds"] += duration or 0
         return summary
+
+    async def stats_by_kind(self) -> dict:
+        """Agregados por attachment_kind. Devuelve {kind: {total, completed, failed,
+        skipped, total_cost_usd, total_duration_seconds}}."""
+        async with aiosqlite.connect(self.path) as db:
+            async with db.execute(
+                "SELECT attachment_kind, status, COUNT(*), "
+                "COALESCE(SUM(transcription_cost_usd), 0), "
+                "COALESCE(SUM(transcription_duration_seconds), 0) "
+                "FROM runs WHERE attachment_kind IS NOT NULL "
+                "GROUP BY attachment_kind, status"
+            ) as cur:
+                rows = await cur.fetchall()
+
+        out: dict = {}
+        for kind, st, count, cost, duration in rows:
+            slot = out.setdefault(kind, {
+                "total": 0, "completed": 0, "failed": 0, "skipped": 0,
+                "total_cost_usd": 0.0, "total_duration_seconds": 0.0,
+            })
+            slot["total"] += count
+            if st in slot:
+                slot[st] = count
+            slot["total_cost_usd"] += cost or 0
+            slot["total_duration_seconds"] += duration or 0
+        return out

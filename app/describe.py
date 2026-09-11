@@ -15,28 +15,6 @@ DEFAULT_DESCRIPTION_MODEL = "google/gemini-2.5-flash"
 # Debajo asumimos escaneado y lo mandamos al modelo vision.
 _PDF_TEXT_MIN_CHARS = 200
 
-_IMAGE_PROMPT = (
-    "Sos un asistente que describe imágenes para una nota de un CRM. "
-    "Respondé SOLO con la nota final, en español, en 3-4 líneas. "
-    "Describí qué muestra la imagen. Si hay presupuesto, monto, fecha o "
-    "números importantes, mencionalos explícitamente. Sin encabezados ni bullets."
-)
-
-_DOCUMENT_TEXT_PROMPT = (
-    "Sos un asistente que resume documentos para una nota de un CRM. "
-    "Respondé SOLO con la nota final, en español, en 3-4 líneas. "
-    "Incluí tipo de documento y tema principal. Si hay presupuesto, monto o "
-    "fecha, mencionalos explícitamente. Sin encabezados ni bullets.\n\n"
-    "Documento:\n{text}"
-)
-
-_DOCUMENT_FILE_PROMPT = (
-    "Sos un asistente que resume documentos para una nota de un CRM. "
-    "Respondé SOLO con la nota final, en español, en 3-4 líneas. "
-    "Incluí tipo de documento y tema principal. Si hay presupuesto, monto o "
-    "fecha, mencionalos explícitamente. Sin encabezados ni bullets."
-)
-
 logger = logging.getLogger("miss.describe")
 
 
@@ -108,11 +86,12 @@ async def describe_image(
     *,
     http: httpx.AsyncClient,
     api_key: str,
-    model: str = DEFAULT_DESCRIPTION_MODEL,
+    model: str,
+    prompt: str,
     timeout: float = 45.0,
 ) -> Description:
     content = [
-        {"type": "text", "text": _IMAGE_PROMPT},
+        {"type": "text", "text": prompt},
         {"type": "image_url", "image_url": {"url": image_url}},
     ]
     return await _chat(
@@ -147,7 +126,8 @@ async def describe_document(
     *,
     http: httpx.AsyncClient,
     api_key: str,
-    model: str = DEFAULT_DESCRIPTION_MODEL,
+    model: str,
+    prompt: str,
     download_timeout: float = 30.0,
     upload_timeout: float = 60.0,
 ) -> Description:
@@ -165,7 +145,7 @@ async def describe_document(
 
     text = _try_extract_pdf_text(download.content) if is_pdf else ""
     if len(text) >= _PDF_TEXT_MIN_CHARS:
-        content = [{"type": "text", "text": _DOCUMENT_TEXT_PROMPT.format(text=text)}]
+        content = [{"type": "text", "text": f"{prompt}\n\nDocumento:\n{text}"}]
         return await _chat(
             http=http, api_key=api_key, model=model, content=content, timeout=upload_timeout
         )
@@ -179,7 +159,7 @@ async def describe_document(
     b64 = base64.b64encode(download.content).decode("ascii")
     filename = document_url.rsplit("/", 1)[-1].split("?", 1)[0] or "documento.pdf"
     content = [
-        {"type": "text", "text": _DOCUMENT_FILE_PROMPT},
+        {"type": "text", "text": prompt},
         {
             "type": "file",
             "file": {

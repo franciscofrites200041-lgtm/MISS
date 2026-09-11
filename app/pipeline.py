@@ -8,29 +8,21 @@ import httpx
 from app.actions import SpoterMassRejected, emit_agregar_nota
 from app.attachments import extract_attachment
 from app.contacts import get_contact_by_phone
-from app.describe import (
-    DEFAULT_DESCRIPTION_MODEL,
-    DescriptionError,
-    describe_document,
-    describe_image,
-)
+from app.describe import DescriptionError, describe_document, describe_image
 from app.models import SpoterWebhookPayload
 from app.spoter import SpoterClient
 from app.storage import RunStore
-from app.transcription import DEFAULT_MODEL, TranscriptionError, transcribe
+from app.tools_store import Tool, ToolsStore
+from app.transcription import TranscriptionError, transcribe
 
 logger = logging.getLogger("miss.pipeline")
 
 
 @dataclass(frozen=True)
 class PipelineConfig:
+    """Config mínima que no vive por tool: credenciales globales + identidad."""
     openrouter_api_key: str
     service_user_id: str
-    note_prefix: str = "[Transcripción de audio]"
-    note_prefix_image: str = "[Descripción de imagen]"
-    note_prefix_document: str = "[Resumen de documento]"
-    transcription_model: str = DEFAULT_MODEL
-    description_model: str = DEFAULT_DESCRIPTION_MODEL
 
 
 @dataclass(frozen=True)
@@ -47,14 +39,13 @@ async def process_webhook(
     http: httpx.AsyncClient,
     spoter: SpoterClient,
     config: PipelineConfig,
+    tools: ToolsStore,
     store: RunStore | None = None,
 ) -> None:
-    """Orquesta el flujo de MISS para webhooks `transcript_audio` /
-    `transcript_image` / `transcript_file`: extraer adjunto -> generar texto
-    (transcripción o descripción) -> resolver contacto -> emitir `agregar_nota`.
-    Todas las fallas se logean; ninguna propaga (sino tumba el background task).
-
-    Si `store` está seteado, persiste cada run con su status y resultado."""
+    """Orquesta el flujo de MISS: extraer adjunto -> dispatch a la tool por
+    attachment.kind -> generar texto -> resolver contacto -> emitir agregar_nota.
+    La config de cada tool (modelo, prompt, prefijo, enabled) viene de ToolsStore.
+    Todas las fallas se logean; ninguna propaga."""
     target = payload.datos_instancias[0] if payload.datos_instancias else None
     run_id = None
     if store is not None:
@@ -80,6 +71,14 @@ async def process_webhook(
         await skip("no supported attachment")
         return
 
+    tool = await tools.get_by_kind(attachment.kind)
+    if tool is None:
+        await skip(f"no tool registered for kind={attachment.kind!r}")
+        return
+    if not tool.enabled:
+        await skip(f"tool {tool.slug!r} is disabled")
+        return
+
     if store is not None and run_id is not None:
         await store.mark_processing(run_id)
         await store.set_attachment(run_id, kind=attachment.kind, url=attachment.url)
@@ -89,43 +88,9 @@ async def process_webhook(
         return
 
     try:
-        if attachment.kind == "audio":
-            transcription = await transcribe(
-                attachment.url,
-                http=http,
-                api_key=config.openrouter_api_key,
-                model=config.transcription_model,
-            )
-            note = _NoteBuild(
-                text=transcription.text.strip(),
-                prefix=config.note_prefix,
-                cost_usd=transcription.cost_usd,
-                duration_seconds=transcription.duration_seconds,
-            )
-        elif attachment.kind == "image":
-            description = await describe_image(
-                attachment.url,
-                http=http,
-                api_key=config.openrouter_api_key,
-                model=config.description_model,
-            )
-            note = _NoteBuild(
-                text=description.text,
-                prefix=config.note_prefix_image,
-                cost_usd=description.cost_usd,
-            )
-        else:  # document
-            description = await describe_document(
-                attachment.url,
-                http=http,
-                api_key=config.openrouter_api_key,
-                model=config.description_model,
-            )
-            note = _NoteBuild(
-                text=description.text,
-                prefix=config.note_prefix_document,
-                cost_usd=description.cost_usd,
-            )
+        note = await _run_tool(
+            tool, attachment.url, http=http, api_key=config.openrouter_api_key,
+        )
     except TranscriptionError as exc:
         await fail(f"transcription failed: {exc}")
         return
@@ -134,7 +99,7 @@ async def process_webhook(
         return
 
     if not note.text:
-        await skip(f"{attachment.kind} produced empty text")
+        await skip(f"{tool.slug} produced empty text")
         return
 
     assert target is not None  # extract_attachment ya verificó que había target
@@ -172,3 +137,39 @@ async def process_webhook(
             contact_name=name or None,
             mass_id_original=id_original,
         )
+
+
+async def _run_tool(
+    tool: Tool,
+    url: str,
+    *,
+    http: httpx.AsyncClient,
+    api_key: str,
+) -> _NoteBuild:
+    if tool.kind == "audio":
+        transcription = await transcribe(
+            url, http=http, api_key=api_key, model=tool.model,
+        )
+        return _NoteBuild(
+            text=transcription.text.strip(),
+            prefix=tool.note_prefix,
+            cost_usd=transcription.cost_usd,
+            duration_seconds=transcription.duration_seconds,
+        )
+    if tool.kind == "image":
+        description = await describe_image(
+            url, http=http, api_key=api_key, model=tool.model,
+            prompt=tool.prompt or "",
+        )
+        return _NoteBuild(
+            text=description.text, prefix=tool.note_prefix, cost_usd=description.cost_usd,
+        )
+    if tool.kind == "document":
+        description = await describe_document(
+            url, http=http, api_key=api_key, model=tool.model,
+            prompt=tool.prompt or "",
+        )
+        return _NoteBuild(
+            text=description.text, prefix=tool.note_prefix, cost_usd=description.cost_usd,
+        )
+    raise ValueError(f"kind no soportado: {tool.kind!r}")
