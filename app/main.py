@@ -7,6 +7,8 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import AsyncIterator
 
+import logging
+
 import httpx
 from fastapi import (
     BackgroundTasks,
@@ -19,6 +21,21 @@ from fastapi import (
     Request,
     status,
 )
+
+
+# ponytail: uvicorn.access loguea cada GET /health, /api/runs, /api/metrics, /api/tools;
+# el dashboard polea cada pocos segundos y ensucia el output. Filtramos solo estos
+# paths ruidosos — el POST del webhook y errores siguen apareciendo.
+_ACCESS_NOISE = ("/health", "/api/runs", "/api/metrics", "/api/tools")
+
+
+class _AccessNoiseFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:  # noqa: A003
+        msg = record.getMessage()
+        return not any(f'"GET {p}' in msg for p in _ACCESS_NOISE)
+
+
+logging.getLogger("uvicorn.access").addFilter(_AccessNoiseFilter())
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
