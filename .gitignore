@@ -20,6 +20,9 @@ data/
 *.db
 *.log
 
+# Worktrees
+.worktrees/
+
 # SO / editores
 .DS_Store
 Thumbs.db
