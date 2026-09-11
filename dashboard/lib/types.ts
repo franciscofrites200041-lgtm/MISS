@@ -32,6 +32,8 @@ export interface OutboundCall {
   url: string;
   status: number;
   ms: number | null;
+  request_body?: string | null;
+  request_headers?: Record<string, string> | null;
 }
 
 export interface RunsPage {

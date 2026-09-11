@@ -48,6 +48,23 @@ _current_run: ContextVar[tuple[str, object] | None] = ContextVar(
 )
 
 
+_BODY_PREVIEW_MAX = 4096  # bytes; audios base64 y PDFs no entran acá, y está bien.
+
+
+def _preview_bytes(raw: bytes | None) -> str | None:
+    if not raw:
+        return None
+    truncated = len(raw) > _BODY_PREVIEW_MAX
+    snippet = raw[:_BODY_PREVIEW_MAX]
+    try:
+        text = snippet.decode("utf-8")
+    except UnicodeDecodeError:
+        return f"<{len(raw)} bytes binarios>"
+    if truncated:
+        text += f"\n… (truncado, total {len(raw)} bytes)"
+    return text
+
+
 async def _record_outbound(response: httpx.Response) -> None:
     ctx = _current_run.get()
     if ctx is None:
@@ -57,12 +74,18 @@ async def _record_outbound(response: httpx.Response) -> None:
         ms = int(response.elapsed.total_seconds() * 1000) if response.elapsed else None
     except Exception:
         ms = None
+    req = response.request
     await store.append_outbound_call(run_id, {
         "ts": datetime.now(timezone.utc).isoformat(),
-        "method": response.request.method,
-        "url": str(response.request.url),
+        "method": req.method,
+        "url": str(req.url),
         "status": response.status_code,
         "ms": ms,
+        "request_body": _preview_bytes(getattr(req, "content", None)),
+        "request_headers": {
+            k: v for k, v in req.headers.items()
+            if k.lower() in {"content-type", "accept", "x-csrf-spoter", "authorization"}
+        },
     })
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials

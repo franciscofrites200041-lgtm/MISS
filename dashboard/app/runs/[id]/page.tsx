@@ -146,41 +146,50 @@ function OutboundCallsTable({ json }: { json: string }) {
     return <div className="text-sm text-slate-500">Sin llamadas salientes.</div>;
   }
   return (
-    <div className="overflow-x-auto rounded-lg bg-slate-950/50">
-      <table className="w-full text-xs">
-        <thead className="text-slate-500">
-          <tr>
-            <th className="px-3 py-2 text-left">Hora</th>
-            <th className="px-3 py-2 text-left">Método</th>
-            <th className="px-3 py-2 text-left">URL</th>
-            <th className="px-3 py-2 text-right">Status</th>
-            <th className="px-3 py-2 text-right">ms</th>
-          </tr>
-        </thead>
-        <tbody>
-          {calls.map((c, i) => (
-            <tr key={i} className="border-t border-white/5">
-              <td className="px-3 py-2 text-slate-400 whitespace-nowrap">
+    <div className="space-y-3">
+      {calls.map((c, i) => (
+        <details key={i} className="rounded-lg bg-slate-950/50 open:pb-3">
+          <summary className="cursor-pointer list-none px-3 py-2 text-xs">
+            <div className="flex items-center gap-3">
+              <span className="text-slate-500 whitespace-nowrap">
                 {new Date(c.ts).toLocaleTimeString("es-AR")}
-              </td>
-              <td className="px-3 py-2 font-mono">{c.method}</td>
-              <td className="px-3 py-2 font-mono break-all">{c.url}</td>
-              <td
+              </span>
+              <span className="font-mono text-slate-200">{c.method}</span>
+              <span
                 className={
                   c.status >= 400
-                    ? "px-3 py-2 text-right font-mono text-red-300"
-                    : "px-3 py-2 text-right font-mono text-emerald-300"
+                    ? "font-mono text-red-300"
+                    : "font-mono text-emerald-300"
                 }
               >
                 {c.status}
-              </td>
-              <td className="px-3 py-2 text-right font-mono text-slate-400">
-                {c.ms ?? "—"}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+              </span>
+              <span className="font-mono text-slate-500">{c.ms ?? "—"}ms</span>
+              <span className="flex-1 truncate font-mono text-slate-300">
+                {c.url}
+              </span>
+            </div>
+          </summary>
+          {c.request_headers && Object.keys(c.request_headers).length > 0 && (
+            <div className="mx-3 mt-2 rounded bg-black/40 p-2 text-xs">
+              <div className="mb-1 text-slate-500">Request headers</div>
+              <pre className="whitespace-pre-wrap font-mono text-slate-300">
+                {Object.entries(c.request_headers)
+                  .map(([k, v]) => `${k}: ${v}`)
+                  .join("\n")}
+              </pre>
+            </div>
+          )}
+          {c.request_body && (
+            <div className="mx-3 mt-2 rounded bg-black/40 p-2 text-xs">
+              <div className="mb-1 text-slate-500">Request body</div>
+              <pre className="whitespace-pre-wrap font-mono text-slate-100">
+                {prettyJson(c.request_body)}
+              </pre>
+            </div>
+          )}
+        </details>
+      ))}
     </div>
   );
 }
