@@ -44,6 +44,7 @@ class DatosConexion(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     mass_url: str
+    token: str | None = None
 
 
 class SpoterWebhookPayload(BaseModel):

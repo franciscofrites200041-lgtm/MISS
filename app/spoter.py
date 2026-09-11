@@ -112,6 +112,11 @@ class SpoterClient:
         self._password = password
         self._cache = cache
 
+    def set_token(self, host: str, instance: str, token: str) -> None:
+        """Seedea el cache con un token ya conocido (ej: el que Spoter manda
+        en `datos_conexion.token`). Bypass del login."""
+        self._cache.set(host, instance, token)
+
     async def request(
         self,
         method: str,

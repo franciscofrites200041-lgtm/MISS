@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from urllib.parse import urlparse
+
 import httpx
 
 from app.actions import SpoterMassRejected, emit_agregar_nota
@@ -103,6 +105,14 @@ async def process_webhook(
         return
 
     assert target is not None  # extract_attachment ya verificó que había target
+
+    # Si Spoter mandó el token en el payload, lo usamos y saltamos el login.
+    payload_token = payload.datos_conexion.token
+    if payload_token:
+        spoter.set_token(
+            urlparse(payload.mass_url).netloc, target.instance, payload_token,
+        )
+
     contact = await get_contact_by_phone(
         spoter,
         mass_url=payload.mass_url,

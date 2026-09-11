@@ -380,6 +380,30 @@ async def test_document_pdf_without_text_falls_back_to_vision(monkeypatch, tools
     assert any(part["type"] == "file" for part in content)
 
 
+async def test_token_from_payload_skips_login(tools):
+    fake = FakeSpoter()
+    http, spoter = _wire(fake)
+
+    body = {**REAL_PAYLOAD}
+    body["datos_conexion"] = {
+        "mass_url": REAL_PAYLOAD["datos_conexion"]["mass_url"],
+        "token": "TOK-FROM-PAYLOAD-1234567890",
+    }
+    payload = SpoterWebhookPayload.model_validate(body)
+
+    async with http:
+        await process_webhook(payload, http=http, spoter=spoter, config=_config(), tools=tools)
+
+    # Emitió la nota (había token) pero NO llamó a /api/auth.json (bypass del login).
+    hit_paths = {(r.url.host, r.url.path) for r in fake.calls}
+    assert ("hub.spoter.com.ar", "/api/mass.json") in hit_paths
+    assert ("hub.spoter.com.ar", "/api/auth.json") not in hit_paths
+
+    # El header X-Csrf-Spoter debe llevar el token del payload.
+    mass_req = [r for r in fake.calls if r.url.path == "/api/mass.json"][0]
+    assert mass_req.headers.get("x-csrf-spoter") == "TOK-FROM-PAYLOAD-1234567890"
+
+
 async def test_audio_bytes_flow_end_to_end(tools):
     fake = FakeSpoter()
     fake.audio_bytes = b"custom audio bytes"
