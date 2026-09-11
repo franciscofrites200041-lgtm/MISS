@@ -10,7 +10,7 @@ from app.attachments import extract_attachment
 from app.contacts import get_contact_by_phone
 from app.describe import DescriptionError, describe_document, describe_image
 from app.models import SpoterWebhookPayload
-from app.spoter import SpoterClient
+from app.spoter import SpoterAuthError, SpoterClient
 from app.storage import RunStore
 from app.tools_store import Tool, ToolsStore
 from app.transcription import TranscriptionError, transcribe
@@ -124,8 +124,17 @@ async def process_webhook(
             id_user=config.service_user_id,
             nombre_sugerido=name,
         )
+    except SpoterAuthError as exc:
+        await fail(f"spoter auth failed: {exc}")
+        return
     except SpoterMassRejected as exc:
         await fail(f"mass emission failed: {exc}")
+        return
+    except Exception as exc:
+        # Última red: cualquier cosa que no anticipamos no debe tumbar el
+        # background task ni dejar la run en 'processing'.
+        logger.exception("unexpected error emitting note")
+        await fail(f"unexpected: {exc.__class__.__name__}: {exc}")
         return
 
     if store is not None and run_id is not None:
