@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +19,11 @@ CREATE TABLE IF NOT EXISTS tools (
     prompt TEXT,
     note_prefix TEXT NOT NULL,
     updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS model_cache (
+    kind TEXT PRIMARY KEY,
+    payload TEXT NOT NULL,
+    fetched_at TEXT NOT NULL
 );
 """
 
@@ -158,3 +164,25 @@ class ToolsStore:
             await db.execute(f"UPDATE tools SET {cols} WHERE slug = ?", values)
             await db.commit()
         return await self.get(slug)
+
+    async def save_model_snapshot(self, kind: str, payload: list[dict]) -> None:
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                "INSERT OR REPLACE INTO model_cache (kind, payload, fetched_at) VALUES (?, ?, ?)",
+                (kind, json.dumps(payload, ensure_ascii=False), _now()),
+            )
+            await db.commit()
+
+    async def load_model_snapshot(self, kind: str) -> list[dict] | None:
+        async with aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT payload FROM model_cache WHERE kind = ?", (kind,)
+            ) as cur:
+                row = await cur.fetchone()
+        if row is None:
+            return None
+        try:
+            return json.loads(row["payload"])
+        except (TypeError, ValueError):
+            return None
