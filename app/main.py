@@ -175,12 +175,11 @@ def _empty_stats() -> dict:
 
 
 def verify_webhook_secret(x_webhook_secret: str | None = Header(default=None)) -> None:
-    expected = os.environ.get("WEBHOOK_SECRET")
+    # ponytail: si WEBHOOK_SECRET está vacío, webhook queda abierto.
+    # Upgrade path: seteá el secret en Portainer y Spoter lo manda en el header.
+    expected = os.environ.get("WEBHOOK_SECRET", "").strip()
     if not expected:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="WEBHOOK_SECRET not configured",
-        )
+        return
     if x_webhook_secret != expected:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
 

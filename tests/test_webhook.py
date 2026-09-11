@@ -67,7 +67,8 @@ def test_webhook_without_secret_header_returns_401(monkeypatch):
     assert response.status_code == 401
 
 
-def test_webhook_fails_closed_when_env_not_set(monkeypatch):
+def test_webhook_is_open_when_secret_not_set(monkeypatch):
+    # Fail-open: si WEBHOOK_SECRET está vacío, el webhook acepta cualquier request.
     monkeypatch.delenv("WEBHOOK_SECRET", raising=False)
     with TestClient(app) as client:
         response = client.post(
@@ -76,7 +77,7 @@ def test_webhook_fails_closed_when_env_not_set(monkeypatch):
             json=REAL_PAYLOAD,
         )
 
-    assert response.status_code == 500
+    assert response.status_code == 202
 
 
 def test_health_endpoint_returns_200_without_auth():
