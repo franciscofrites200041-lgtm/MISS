@@ -116,9 +116,14 @@ async def process_webhook(
     # Si Spoter mandó el token en el payload, lo usamos y saltamos el login.
     payload_token = payload.datos_conexion.token
     if payload_token:
-        spoter.set_token(
-            urlparse(payload.mass_url).netloc, target.instance, payload_token,
+        host = urlparse(payload.mass_url).netloc
+        logger.info(
+            "using payload token (prefix=%s len=%d) for host=%s instance=%s",
+            payload_token[:8], len(payload_token), host, target.instance,
         )
+        spoter.set_token(host, target.instance, payload_token)
+    else:
+        logger.warning("no payload token in datos_conexion, falling back to env creds")
 
     contact = await get_contact_by_phone(
         spoter,

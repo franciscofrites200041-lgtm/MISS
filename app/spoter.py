@@ -146,6 +146,11 @@ class SpoterClient:
     ) -> httpx.Response:
         headers = dict(kwargs.pop("headers", {}) or {})
         headers["X-Csrf-Spoter"] = token
+        import logging as _logging
+        _logging.getLogger("miss.spoter").info(
+            "sending %s %s with X-Csrf-Spoter prefix=%s len=%d",
+            method, url, token[:8], len(token),
+        )
         return await self._http.request(method, url, headers=headers, **kwargs)
 
     async def _login(self, host: str, instance: str) -> str:
