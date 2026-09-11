@@ -1,4 +1,12 @@
-import type { MetricsSummary, Run, RunsPage } from "./types";
+import type {
+  MetricsSummary,
+  Run,
+  RunsPage,
+  Tool,
+  ToolDetail,
+  ToolPatch,
+  ToolsList,
+} from "./types";
 
 const API_URL = process.env.MISS_API_URL || "http://miss:8000";
 const API_USER = process.env.MISS_API_USER || "";
@@ -10,9 +18,14 @@ function authHeader(): Record<string, string> {
   return { Authorization: `Basic ${token}` };
 }
 
-async function fetchJson<T>(path: string): Promise<T> {
+async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, {
-    headers: { ...authHeader() },
+    ...init,
+    headers: {
+      ...authHeader(),
+      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      ...(init?.headers || {}),
+    },
     cache: "no-store",
   });
   if (!response.ok) {
@@ -43,4 +56,24 @@ export async function fetchRun(id: string): Promise<Run | null> {
 
 export async function fetchMetrics(): Promise<MetricsSummary> {
   return fetchJson<MetricsSummary>("/api/metrics");
+}
+
+export async function fetchTools(): Promise<ToolsList> {
+  return fetchJson<ToolsList>("/api/tools");
+}
+
+export async function fetchTool(slug: string): Promise<ToolDetail | null> {
+  try {
+    return await fetchJson<ToolDetail>(`/api/tools/${encodeURIComponent(slug)}`);
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("404")) return null;
+    throw err;
+  }
+}
+
+export async function updateTool(slug: string, patch: ToolPatch): Promise<Tool> {
+  return fetchJson<Tool>(`/api/tools/${encodeURIComponent(slug)}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
 }

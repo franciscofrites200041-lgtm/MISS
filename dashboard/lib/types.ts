@@ -40,3 +40,45 @@ export interface MetricsSummary {
   total_cost_usd: number;
   total_duration_seconds: number;
 }
+
+export interface ToolStats {
+  total: number;
+  completed: number;
+  failed: number;
+  skipped: number;
+  total_cost_usd: number;
+  total_duration_seconds: number;
+}
+
+export interface Tool {
+  slug: string;
+  name: string;
+  description: string;
+  kind: string;
+  enabled: boolean;
+  model: string;
+  prompt: string | null;
+  note_prefix: string;
+  updated_at: string;
+}
+
+export interface ToolWithStats extends Tool {
+  stats: ToolStats;
+}
+
+export interface ToolsList {
+  items: ToolWithStats[];
+}
+
+export interface ToolDetail extends ToolWithStats {
+  recent_runs: Run[];
+}
+
+export interface ToolPatch {
+  name?: string;
+  description?: string;
+  enabled?: boolean;
+  model?: string;
+  prompt?: string | null;
+  note_prefix?: string;
+}
