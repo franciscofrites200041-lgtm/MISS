@@ -70,6 +70,8 @@ async def _chat(
             json={
                 "model": model,
                 "messages": [{"role": "user", "content": content}],
+                # 3-4 líneas caben holgadamente en 200 tokens; corta accidentes.
+                "max_tokens": 200,
                 "usage": {"include": True},
             },
         )
