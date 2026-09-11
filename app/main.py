@@ -109,6 +109,7 @@ async def _record_outbound(response: httpx.Response) -> None:
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
+from app.model_catalog import ModelCatalog
 from app.models import SpoterWebhookPayload
 from app.pipeline import PipelineConfig, process_webhook
 from app.spoter import SpoterClient
@@ -142,6 +143,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     tools = ToolsStore(runs_db_path)  # misma DB, tabla separada
     await tools.init()
     app.state.tools = tools
+
+    app.state.catalog = ModelCatalog(
+        http=http,
+        api_key=app.state.config.openrouter_api_key,
+        store=app.state.tools,
+    )
 
     try:
         yield
@@ -236,6 +243,27 @@ async def api_get_tool(request: Request, slug: str):
         **asdict(tool),
         "stats": stats.get(tool.kind, _empty_stats()),
         "recent_runs": [asdict(r) for r in recent],
+    }
+
+
+@app.get("/api/llm/models", dependencies=[Depends(verify_dashboard_auth)])
+async def api_llm_models(request: Request, kind: str = Query(...)):
+    if kind not in {"audio", "image", "document"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"kind inválido: {kind}")
+    result = await request.app.state.catalog.get(kind)
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
+                            detail="catálogo de modelos no disponible")
+    models = list(result.models)
+    tool = await request.app.state.tools.get_by_kind(kind)
+    if tool is not None and not any(m["id"] == tool.model for m in models):
+        models.insert(0, {"id": tool.model, "name": tool.model})
+    return {
+        "kind": kind,
+        "models": models,
+        "source": result.source,
+        "fetched_at": result.fetched_at,
     }
 
 

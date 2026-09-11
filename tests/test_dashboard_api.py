@@ -4,6 +4,7 @@ from base64 import b64encode
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.model_catalog import CatalogResult
 
 
 AUTH_HEADER = {"Authorization": "Basic " + b64encode(b"admin:pw").decode()}
@@ -184,3 +185,58 @@ def test_health_stays_open_without_auth():
         response = client.get("/health")
 
     assert response.status_code == 200
+
+
+class _FakeCatalog:
+    def __init__(self, result):
+        self._result = result
+
+    async def get(self, kind):
+        return self._result
+
+
+def test_llm_models_requires_auth(monkeypatch):
+    monkeypatch.setenv("MISS_DASHBOARD_USER", "admin")
+    monkeypatch.setenv("MISS_DASHBOARD_PASS", "pw")
+    with TestClient(app) as client:
+        response = client.get("/api/llm/models?kind=image")
+    assert response.status_code == 401
+
+
+def test_llm_models_rejects_unknown_kind(monkeypatch):
+    monkeypatch.setenv("MISS_DASHBOARD_USER", "admin")
+    monkeypatch.setenv("MISS_DASHBOARD_PASS", "pw")
+    with TestClient(app) as client:
+        response = client.get("/api/llm/models?kind=video", headers=AUTH_HEADER)
+    assert response.status_code == 400
+
+
+def test_llm_models_returns_filtered_list_including_current_model(monkeypatch, tools):
+    monkeypatch.setenv("MISS_DASHBOARD_USER", "admin")
+    monkeypatch.setenv("MISS_DASHBOARD_PASS", "pw")
+    fake = _FakeCatalog(CatalogResult(
+        kind="audio",
+        models=[{"id": "openai/whisper-1", "name": "Whisper"}],
+        source="live", fetched_at="2026-09-11T00:00:00+00:00",
+    ))
+    with TestClient(app) as client:
+        client.app.state.catalog = fake
+        response = client.get("/api/llm/models?kind=audio", headers=AUTH_HEADER)
+
+    assert response.status_code == 200
+    body = response.json()
+    ids = [m["id"] for m in body["models"]]
+    # El modelo actual sembrado para audio (openai/whisper-large-v3-turbo)
+    # debe seguir apareciendo aunque no esté en la lista del catálogo.
+    assert ids[0] == "openai/whisper-large-v3-turbo"
+    assert body["source"] == "live"
+
+
+def test_llm_models_returns_502_when_no_data(monkeypatch):
+    monkeypatch.setenv("MISS_DASHBOARD_USER", "admin")
+    monkeypatch.setenv("MISS_DASHBOARD_PASS", "pw")
+    with TestClient(app) as client:
+        client.app.state.catalog = _FakeCatalog(None)
+        response = client.get("/api/llm/models?kind=image", headers=AUTH_HEADER)
+    assert response.status_code == 502
+    assert "catálogo" in response.json()["detail"]
