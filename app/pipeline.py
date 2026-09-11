@@ -8,6 +8,12 @@ import httpx
 from app.actions import SpoterMassRejected, emit_agregar_nota
 from app.attachments import extract_attachment
 from app.contacts import get_contact_by_phone
+from app.describe import (
+    DEFAULT_DESCRIPTION_MODEL,
+    DescriptionError,
+    describe_document,
+    describe_image,
+)
 from app.models import SpoterWebhookPayload
 from app.spoter import SpoterClient
 from app.storage import RunStore
@@ -21,7 +27,18 @@ class PipelineConfig:
     openrouter_api_key: str
     service_user_id: str
     note_prefix: str = "[Transcripción de audio]"
+    note_prefix_image: str = "[Descripción de imagen]"
+    note_prefix_document: str = "[Resumen de documento]"
     transcription_model: str = DEFAULT_MODEL
+    description_model: str = DEFAULT_DESCRIPTION_MODEL
+
+
+@dataclass(frozen=True)
+class _NoteBuild:
+    text: str
+    prefix: str
+    cost_usd: float | None = None
+    duration_seconds: float | None = None
 
 
 async def process_webhook(
@@ -32,8 +49,9 @@ async def process_webhook(
     config: PipelineConfig,
     store: RunStore | None = None,
 ) -> None:
-    """Orquesta el flujo completo de MISS para un webhook `transcript_audio`:
-    extraer audio -> transcribir -> resolver contacto -> emitir `agregar_nota`.
+    """Orquesta el flujo de MISS para webhooks `transcript_audio` /
+    `transcript_image` / `transcript_file`: extraer adjunto -> generar texto
+    (transcripción o descripción) -> resolver contacto -> emitir `agregar_nota`.
     Todas las fallas se logean; ninguna propaga (sino tumba el background task).
 
     Si `store` está seteado, persiste cada run con su status y resultado."""
@@ -58,8 +76,8 @@ async def process_webhook(
             await store.mark_failed(run_id, error_message=reason)
 
     attachment = extract_attachment(payload)
-    if attachment is None or attachment.kind != "audio":
-        await skip("no client audio attachment")
+    if attachment is None or attachment.kind not in {"audio", "image", "document"}:
+        await skip("no supported attachment")
         return
 
     if store is not None and run_id is not None:
@@ -71,19 +89,52 @@ async def process_webhook(
         return
 
     try:
-        transcription = await transcribe(
-            attachment.url,
-            http=http,
-            api_key=config.openrouter_api_key,
-            model=config.transcription_model,
-        )
+        if attachment.kind == "audio":
+            transcription = await transcribe(
+                attachment.url,
+                http=http,
+                api_key=config.openrouter_api_key,
+                model=config.transcription_model,
+            )
+            note = _NoteBuild(
+                text=transcription.text.strip(),
+                prefix=config.note_prefix,
+                cost_usd=transcription.cost_usd,
+                duration_seconds=transcription.duration_seconds,
+            )
+        elif attachment.kind == "image":
+            description = await describe_image(
+                attachment.url,
+                http=http,
+                api_key=config.openrouter_api_key,
+                model=config.description_model,
+            )
+            note = _NoteBuild(
+                text=description.text,
+                prefix=config.note_prefix_image,
+                cost_usd=description.cost_usd,
+            )
+        else:  # document
+            description = await describe_document(
+                attachment.url,
+                http=http,
+                api_key=config.openrouter_api_key,
+                model=config.description_model,
+            )
+            note = _NoteBuild(
+                text=description.text,
+                prefix=config.note_prefix_document,
+                cost_usd=description.cost_usd,
+            )
     except TranscriptionError as exc:
         await fail(f"transcription failed: {exc}")
         return
+    except DescriptionError as exc:
+        await fail(f"description failed: {exc}")
+        return
 
-    text = transcription.text.strip()
-    if not text:
-        await skip("transcription returned empty text")
+    if not note.text:
+        await skip(f"{attachment.kind} produced empty text")
         return
 
     assert target is not None  # extract_attachment ya verificó que había target
@@ -95,7 +146,7 @@ async def process_webhook(
     )
     name = contact.name if contact else ""
 
-    mensaje = f"{config.note_prefix} {text}".strip()
+    mensaje = f"{note.prefix} {note.text}".strip()
 
     try:
         id_original = await emit_agregar_nota(
@@ -115,9 +166,9 @@ async def process_webhook(
     if store is not None and run_id is not None:
         await store.mark_completed(
             run_id,
-            transcription_text=text,
-            transcription_cost_usd=transcription.cost_usd,
-            transcription_duration_seconds=transcription.duration_seconds,
+            transcription_text=note.text,
+            transcription_cost_usd=note.cost_usd,
+            transcription_duration_seconds=note.duration_seconds,
             contact_name=name or None,
             mass_id_original=id_original,
         )

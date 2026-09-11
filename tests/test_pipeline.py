@@ -262,7 +262,7 @@ async def test_persists_skipped_run_when_no_audio(tmp_path):
     rows = await store.list()
     assert len(rows) == 1
     assert rows[0].status == "skipped"
-    assert "no client audio" in (rows[0].error_message or "")
+    assert "no supported attachment" in (rows[0].error_message or "")
 
 
 async def test_persists_failed_run_when_mass_emission_fails(tmp_path):
@@ -284,6 +284,118 @@ async def test_persists_failed_run_when_mass_emission_fails(tmp_path):
     assert len(rows) == 1
     assert rows[0].status == "failed"
     assert "mass emission" in (rows[0].error_message or "")
+
+
+class FakeSpoterMulti(FakeSpoter):
+    """Extiende FakeSpoter para servir imágenes/PDFs y respuestas de chat."""
+
+    def __init__(self):
+        super().__init__()
+        self.image_bytes = b"\x89PNG\r\n\x1a\nfake"
+        self.image_content_type = "image/png"
+        self.pdf_bytes = b"%PDF-1.4 fake body"
+        self.pdf_content_type = "application/pdf"
+        self.chat_response = {
+            "choices": [{"message": {"content": "Presupuesto por $50.000 firmado el 10/09/2026."}}],
+            "usage": {"cost": 0.0002},
+        }
+
+    def handler(self, request):
+        self.calls.append(request)
+        u = request.url
+        if u.host == "openrouter.ai" and u.path == "/api/v1/chat/completions":
+            return httpx.Response(200, json=self.chat_response)
+        if u.path.startswith("/image/"):
+            return httpx.Response(
+                200, content=self.image_bytes,
+                headers={"content-type": self.image_content_type},
+            )
+        if u.path.startswith("/file/"):
+            return httpx.Response(
+                200, content=self.pdf_bytes,
+                headers={"content-type": self.pdf_content_type},
+            )
+        return super().handler(request)
+
+
+def _payload_with(message):
+    body = {**REAL_PAYLOAD}
+    body["datos_instancias"] = {
+        **REAL_PAYLOAD["datos_instancias"], "message": message,
+    }
+    return SpoterWebhookPayload.model_validate(body)
+
+
+async def test_image_event_calls_chat_and_emits_note_with_image_prefix():
+    fake = FakeSpoterMulti()
+    http, spoter = _wire(fake)
+    payload = _payload_with({
+        "tipo": "image", "propio": 0, "fecha_hora": "2026-09-10T08:28:32",
+        "mensaje": "", "media_url": "https://hub.spoter.com.ar/image/42",
+    })
+
+    async with http:
+        await process_webhook(payload, http=http, spoter=spoter, config=_config())
+
+    hit_paths = {(r.url.host, r.url.path) for r in fake.calls}
+    assert ("openrouter.ai", "/api/v1/chat/completions") in hit_paths
+    # No debe llamar al endpoint de transcripción de audio.
+    assert ("openrouter.ai", "/api/v1/audio/transcriptions") not in hit_paths
+
+    action = fake.captured_mass_body["actions"][0]
+    assert action["mensaje_nota"].startswith("[Descripción de imagen] ")
+    assert "Presupuesto por $50.000" in action["mensaje_nota"]
+
+
+async def test_document_pdf_with_extractable_text_skips_vision(monkeypatch):
+    # Forzamos que pypdf devuelva texto suficiente → NO se envía el PDF binario.
+    from app import describe as describe_mod
+    monkeypatch.setattr(
+        describe_mod, "_try_extract_pdf_text",
+        lambda raw: "Presupuesto N° 123 por $50.000 emitido el 10/09/2026. " * 20,
+    )
+
+    fake = FakeSpoterMulti()
+    http, spoter = _wire(fake)
+    payload = _payload_with({
+        "tipo": "document", "propio": 0, "fecha_hora": "2026-09-10T08:28:32",
+        "mensaje": "", "media_url": "https://hub.spoter.com.ar/file/99.pdf",
+    })
+
+    async with http:
+        await process_webhook(payload, http=http, spoter=spoter, config=_config())
+
+    chat_reqs = [r for r in fake.calls if r.url.path == "/api/v1/chat/completions"]
+    assert len(chat_reqs) == 1
+    body = json.loads(chat_reqs[0].content)
+    content = body["messages"][0]["content"]
+    # Con texto extraído, el content debe ser solo texto (no `file`).
+    assert all(part["type"] == "text" for part in content)
+
+    action = fake.captured_mass_body["actions"][0]
+    assert action["mensaje_nota"].startswith("[Resumen de documento] ")
+
+
+async def test_document_pdf_without_text_falls_back_to_vision(monkeypatch):
+    from app import describe as describe_mod
+    monkeypatch.setattr(describe_mod, "_try_extract_pdf_text", lambda raw: "")
+
+    fake = FakeSpoterMulti()
+    http, spoter = _wire(fake)
+    payload = _payload_with({
+        "tipo": "document", "propio": 0, "fecha_hora": "2026-09-10T08:28:32",
+        "mensaje": "", "media_url": "https://hub.spoter.com.ar/file/99.pdf",
+    })
+
+    async with http:
+        await process_webhook(payload, http=http, spoter=spoter, config=_config())
+
+    chat_reqs = [r for r in fake.calls if r.url.path == "/api/v1/chat/completions"]
+    assert len(chat_reqs) == 1
+    body = json.loads(chat_reqs[0].content)
+    content = body["messages"][0]["content"]
+    # Sin texto extraíble, el content debe incluir el `file` con base64 del PDF.
+    assert any(part["type"] == "file" for part in content)
 
 
 async def test_audio_bytes_flow_end_to_end():

@@ -25,6 +25,7 @@ from app.models import SpoterWebhookPayload
 from app.pipeline import PipelineConfig, process_webhook
 from app.spoter import SpoterClient, TokenCache
 from app.storage import RunStore
+from app.describe import DEFAULT_DESCRIPTION_MODEL
 from app.transcription import DEFAULT_MODEL
 
 
@@ -33,7 +34,16 @@ def _load_config() -> PipelineConfig:
         openrouter_api_key=os.environ.get("OPENROUTER_API_KEY", ""),
         service_user_id=os.environ.get("MISS_SERVICE_USER_ID", ""),
         note_prefix=os.environ.get("MISS_NOTE_PREFIX", "[Transcripción de audio]"),
+        note_prefix_image=os.environ.get(
+            "MISS_NOTE_PREFIX_IMAGE", "[Descripción de imagen]"
+        ),
+        note_prefix_document=os.environ.get(
+            "MISS_NOTE_PREFIX_DOCUMENT", "[Resumen de documento]"
+        ),
         transcription_model=os.environ.get("TRANSCRIPTION_MODEL", DEFAULT_MODEL),
+        description_model=os.environ.get(
+            "DESCRIPTION_MODEL", DEFAULT_DESCRIPTION_MODEL
+        ),
     )
 
 
