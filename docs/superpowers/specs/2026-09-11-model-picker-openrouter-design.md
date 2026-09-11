@@ -1,4 +1,4 @@
-# Diseño: selector de modelos OpenRouter en el dashboard
+# Diseño: selector de modelos OpenRouter + panel de prueba en el dashboard
 
 Fecha: 2026-09-11
 
@@ -21,6 +21,10 @@ disponibles en OpenRouter para cada tarea (audio, imagen, documento).
   campo `model`) vía el PATCH existente → **aplica sin redeploy**.
 - El modelo actualmente configurado siempre aparece como opción aunque no esté
   en la lista filtrada, para que el valor guardado nunca quede colgado.
+
+Además, cada herramienta tiene un **panel de prueba**: se sube un archivo del
+tipo que maneja la tool y se procesa con el modelo elegido (el configurado u
+otro a elección) para ver el resultado, el costo y la latencia. Sin persistir.
 
 ## Enfoque elegido
 
@@ -94,6 +98,64 @@ Misma DB (`RUNS_DB_PATH`), coherente con el resto del store.
   - `onChange` → `setModel(value)`. Guardar → mismo PATCH existente
     (`model: model`). Sin redeploy.
 
+### 5. Backend — endpoint de prueba `POST /api/tools/{slug}/test`
+
+- Recibe `multipart/form-data`: `file` (obligatorio) + `model` (opcional).
+  Protegido con `verify_dashboard_auth`; tool inexistente → 404.
+- Validaciones:
+  - `audio` → content-type/extensión en el set que ya usa `transcription.py`
+    (wav, mp3, ogg/opus, webm, m4a/aac).
+  - `image` → png/jpeg/webp/gif/bmp.
+  - `document` → **solo PDF** (describe_document solo soporta pdf).
+  - Tipo inválido → 400 con detalle.
+  - Tamaño máx 20 MB.
+  - `model` vacío/ausente → usa `tool.model` (el configurado). Si viene, se usa
+    tal cual (es el modelo de prueba opcional).
+- Corre la tool contra los bytes **sin descargar de ninguna URL**:
+  - Refactor en `transcription.py` / `describe.py`: extraer el core "mandar
+    bytes a OpenRouter" en funciones `*_bytes(raw, content_type, ...)`. Las
+    funciones URL actuales descargan y delegan ahí → el path del webhook queda
+    idéntico.
+  - `image` → `describe_image_bytes` manda data URI a vision.
+  - `document` → extrae texto (`pypdf`) o manda el PDF como `type: file`, igual
+    que el path online.
+- Respuesta:
+  `{model, text, cost_usd, duration_seconds, latency_ms,
+  file: {name, size, content_type}}`.
+  - `cost_usd` → `usage.cost` de OpenRouter. `duration_seconds` → `usage.seconds`
+    (audio). `latency_ms` → `response.elapsed` de la llamada a OpenRouter.
+- Errores: 400 (validación), 502 si OpenRouter falla (`{error, detail}`).
+- Log INFO con métricas (nombre, tamaño, modelo, costo, latencia) — sin volcar
+  el archivo.
+
+### 6. Dashboard — panel de prueba
+
+- Ruta proxy `dashboard/app/api/tools/[slug]/test/route.ts` (POST) → reenvía el
+  FormData a MISS con el basic auth del server (patrón de `/api/tools`).
+- `dashboard/lib/api.ts`: `testTool(slug, formData)`.
+- `dashboard/lib/types.ts`: `ToolTestResult` y `ToolTestFile`.
+- Componente nuevo `dashboard/app/tools/[slug]/tester.tsx`, pegado debajo del
+  editor:
+  - Input de archivo con `accept` según kind (`audio/*`, `image/*`,
+    `application/pdf`).
+  - Select de modelo **opcional**, alimentado por el mismo catálogo del dropdown
+    del editor → opción default "Modelo configurado (<actual>)".
+  - Botón "Probar" + spinner mientras corre.
+  - Resultado: texto (pre-wrap), modelo usado, costo $, latencia ms, duración s
+    (audio), nombre y tamaño del archivo. Errores visibles (400/502).
+  - Ephemeral: estado local del componente; no toca la DB ni crea runs.
+
+### 7. Testing
+
+- Unit: filtrado del catálogo, save/load de snapshot, fallback a cache viejo.
+- API catálogo: auth, kind inválido → 400, inclusión del modelo actual, 502 sin
+  datos.
+- API prueba: validación de tipos por kind, límite de tamaño, 404 tool
+  inexistente, 502 OpenRouter caído. Con `httpx.MockTransport` inyectado en
+  `app.state.http`: audio → POST a `/audio/transcriptions`; image → chat
+  completions con data URI; document → texto o vision. Se afirma que la
+  respuesta trae `text`, `cost_usd`, `latency_ms`, `duration_seconds`.
+
 ## Errores y casos borde
 
 - **OpenRouter caído y sin snapshot**: 502; el editor cae al modelo actual como
@@ -108,19 +170,12 @@ Misma DB (`RUNS_DB_PATH`), coherente con el resto del store.
 
 - `app/model_catalog.py` (nuevo)
 - `app/tools_store.py`
+- `app/describe.py`
+- `app/transcription.py`
 - `app/main.py`
 - `dashboard/app/api/models/route.ts` (nuevo)
+- `dashboard/app/api/tools/[slug]/test/route.ts` (nuevo)
 - `dashboard/lib/api.ts`
 - `dashboard/lib/types.ts`
 - `dashboard/app/tools/[slug]/editor.tsx`
-
-## Testing
-
-- `tests/test_model_catalog.py`: filtrado unitario con payloads fake de OpenRouter
-  (audio/image/document), save/load de snapshot, y fallback a cache viejo.
-- Tests de API en `tests/test_dashboard_api.py`:
-  - `/api/llm/models` requiere auth.
-  - `kind` inválido → 400.
-  - Con `ModelCatalog` fake en `app.state.catalog`: devuelve lista filtrada e
-    incluye el modelo actual de la tool aunque no esté en la lista.
-  - Sin datos disponibles → 502.
+- `dashboard/app/tools/[slug]/tester.tsx` (nuevo)
