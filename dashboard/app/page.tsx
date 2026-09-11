@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Activity, CheckCircle2, Coins, AlertCircle, Clock, Mic, Image as ImageIcon, FileText } from "lucide-react";
+import { Activity, CheckCircle2, Coins, AlertCircle, Clock, Mic, Image as ImageIcon, FileText, ChevronRight } from "lucide-react";
 
 import { fetchMetrics, fetchRuns } from "@/lib/api";
 import type { Run, RunStatus } from "@/lib/types";
@@ -150,13 +150,14 @@ export default async function DashboardPage() {
                   <th className="px-5 py-3 text-left">Contacto</th>
                   <th className="px-5 py-3 text-right">Duración</th>
                   <th className="px-5 py-3 text-right">Costo</th>
+                  <th className="px-5 py-3"></th>
                 </tr>
               </thead>
               <tbody>
                 {runsPage.items.map((r: Run) => (
                   <tr
                     key={r.id}
-                    className="border-t border-white/5 transition hover:bg-white/5"
+                    className="group cursor-pointer border-t border-white/5 transition hover:bg-white/5"
                   >
                     <td className="px-5 py-3 text-slate-300 whitespace-nowrap">
                       <Link href={`/runs/${r.id}`} className="hover:text-blue-400">
@@ -182,6 +183,15 @@ export default async function DashboardPage() {
                     </td>
                     <td className="px-5 py-3 text-slate-400 text-right font-mono">
                       {formatUsd(r.transcription_cost_usd)}
+                    </td>
+                    <td className="px-5 py-3 text-right">
+                      <Link
+                        href={`/runs/${r.id}`}
+                        className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-blue-400"
+                      >
+                        Ver
+                        <ChevronRight className="h-3.5 w-3.5" />
+                      </Link>
                     </td>
                   </tr>
                 ))}
