@@ -94,3 +94,30 @@ export interface ToolPatch {
   prompt?: string | null;
   note_prefix?: string;
 }
+
+export interface LlmModel {
+  id: string;
+  name: string;
+}
+
+export interface LlmModelsResponse {
+  kind: string;
+  models: LlmModel[];
+  source: string;
+  fetched_at: string | null;
+}
+
+export interface ToolTestFile {
+  name: string | null;
+  size: number;
+  content_type: string | null;
+}
+
+export interface ToolTestResult {
+  model: string;
+  text: string;
+  cost_usd: number | null;
+  duration_seconds: number | null;
+  latency_ms: number | null;
+  file: ToolTestFile;
+}

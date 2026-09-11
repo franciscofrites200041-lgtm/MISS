@@ -1,10 +1,13 @@
 import type {
+  LlmModel,
+  LlmModelsResponse,
   MetricsSummary,
   Run,
   RunsPage,
   Tool,
   ToolDetail,
   ToolPatch,
+  ToolTestResult,
   ToolsList,
 } from "./types";
 
@@ -23,7 +26,9 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: {
       ...authHeader(),
-      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      ...(init?.body && typeof init.body === "string"
+        ? { "Content-Type": "application/json" }
+        : {}),
       ...(init?.headers || {}),
     },
     cache: "no-store",
@@ -76,4 +81,20 @@ export async function updateTool(slug: string, patch: ToolPatch): Promise<Tool> 
     method: "PATCH",
     body: JSON.stringify(patch),
   });
+}
+
+export async function fetchModels(kind: string): Promise<LlmModelsResponse> {
+  return fetchJson<LlmModelsResponse>(
+    `/api/llm/models?kind=${encodeURIComponent(kind)}`
+  );
+}
+
+export async function testTool(
+  slug: string,
+  formData: FormData
+): Promise<ToolTestResult> {
+  return fetchJson<ToolTestResult>(
+    `/api/tools/${encodeURIComponent(slug)}/test`,
+    { method: "POST", body: formData }
+  );
 }
