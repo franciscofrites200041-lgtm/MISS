@@ -144,6 +144,13 @@ class SpoterClient:
         return await self._http.request(method, url, headers=headers, **kwargs)
 
     async def _login(self, host: str, instance: str) -> str:
+        # Si SPOTER_API_PASS parece un token estático (>20 chars, sin @) — como
+        # lo trata MASS — usarlo directo sin pegarle a /auth.json. Cachea igual
+        # para que el retry ante 401 lo invalide y no entre en loop.
+        if self._password and len(self._password) > 20 and "@" not in self._password:
+            self._cache.set(host, instance, self._password)
+            return self._password
+
         credentials = {
             "email": self._email,
             "instance": instance,
