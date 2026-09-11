@@ -12,9 +12,6 @@ services:
     environment:
       - TZ=America/Argentina/Buenos_Aires
       - WEBHOOK_SECRET=${WEBHOOK_SECRET}
-      - SPOTER_API_USER=${SPOTER_API_USER}
-      - SPOTER_API_PASS=${SPOTER_API_PASS}
-      - TOKEN_CACHE_PATH=${TOKEN_CACHE_PATH:-/app/data/auth.json}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - TRANSCRIPTION_MODEL=${TRANSCRIPTION_MODEL:-openai/whisper-large-v3-turbo}
       - DESCRIPTION_MODEL=${DESCRIPTION_MODEL:-google/gemini-2.5-flash}

@@ -122,17 +122,18 @@ async def process_webhook(
 
     assert target is not None  # extract_attachment ya verificó que había target
 
-    # Si Spoter mandó el token en el payload, lo usamos y saltamos el login.
+    # El token para hablarle a Spoter viene siempre en el payload; sin él no
+    # podemos emitir la nota. No hay fallback.
     payload_token = payload.datos_conexion.token
-    if payload_token:
-        host = urlparse(payload.mass_url).netloc
-        logger.info(
-            "using payload token (prefix=%s len=%d) for host=%s instance=%s",
-            payload_token[:8], len(payload_token), host, target.instance,
-        )
-        spoter.set_token(host, target.instance, payload_token)
-    else:
-        logger.warning("no payload token in datos_conexion, falling back to env creds")
+    if not payload_token:
+        await fail("no token in datos_conexion — cannot call Spoter")
+        return
+    host = urlparse(payload.mass_url).netloc
+    logger.info(
+        "using payload token (prefix=%s len=%d) for host=%s instance=%s",
+        payload_token[:8], len(payload_token), host, target.instance,
+    )
+    spoter.set_token(host, target.instance, payload_token)
 
     contact = await get_contact_by_phone(
         spoter,

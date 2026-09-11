@@ -5,13 +5,16 @@ import httpx
 
 from app.models import SpoterWebhookPayload
 from app.pipeline import PipelineConfig, process_webhook
-from app.spoter import SpoterClient, TokenCache
+from app.spoter import SpoterClient
 
 
 REAL_PAYLOAD = {
     "instance": "95",
     "async": 1,
-    "datos_conexion": {"mass_url": "https://hub.spoter.com.ar/api/mass.json"},
+    "datos_conexion": {
+        "mass_url": "https://hub.spoter.com.ar/api/mass.json",
+        "token": "TEST-PAYLOAD-TOKEN-1234567890",
+    },
     "event_type": "transcript_audio",
     "datos_instancias": {
         "instance": "26434",
@@ -66,7 +69,7 @@ class FakeSpoter:
 
 def _wire(fake):
     http = httpx.AsyncClient(transport=httpx.MockTransport(fake.handler))
-    spoter = SpoterClient(http, email="e@x", password="pw", cache=TokenCache())
+    spoter = SpoterClient(http)
     return http, spoter
 
 

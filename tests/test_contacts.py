@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from app.contacts import Contact, get_contact_by_phone
-from app.spoter import SpoterClient, TokenCache
+from app.spoter import SpoterClient
 
 
 MASS_URL = "https://hub.spoter.com.ar/api/mass.json"
@@ -12,9 +12,9 @@ MASS_URL = "https://hub.spoter.com.ar/api/mass.json"
 
 def _make_client(handler):
     http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    cache = TokenCache()
-    cache.set("hub.spoter.com.ar", "95", "TESTTOKEN")
-    return SpoterClient(http, email="e@x", password="pw", cache=cache), http
+    client = SpoterClient(http)
+    client.set_token("hub.spoter.com.ar", "95", "TESTTOKEN")
+    return client, http
 
 
 async def test_returns_contact_when_nickname_present():

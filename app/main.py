@@ -111,7 +111,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from app.models import SpoterWebhookPayload
 from app.pipeline import PipelineConfig, process_webhook
-from app.spoter import SpoterClient, TokenCache
+from app.spoter import SpoterClient
 from app.storage import RunStore
 from app.tools_store import ToolsStore
 
@@ -124,14 +124,7 @@ def _load_config() -> PipelineConfig:
 
 
 def _build_spoter(http: httpx.AsyncClient) -> SpoterClient:
-    cache_path = os.environ.get("TOKEN_CACHE_PATH", "").strip()
-    cache = TokenCache(path=Path(cache_path)) if cache_path else TokenCache()
-    return SpoterClient(
-        http,
-        email=os.environ.get("SPOTER_API_USER", ""),
-        password=os.environ.get("SPOTER_API_PASS", ""),
-        cache=cache,
-    )
+    return SpoterClient(http)
 
 
 @asynccontextmanager

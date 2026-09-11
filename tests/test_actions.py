@@ -5,22 +5,20 @@ import httpx
 import pytest
 
 from app.actions import SpoterMassRejected, emit_agregar_nota
-from app.spoter import SpoterClient, TokenCache
+from app.spoter import SpoterClient
 
 
 MASS_URL = "https://hub.spoter.com.ar/api/mass.json"
 
 
 def _make_client(handler):
-    """Wrap the handler para auto-responder /api/auth.json con un token válido,
-    así los tests no necesitan pre-cargar el cache para cada sub-instance."""
-    def wrapped(request):
-        if request.url.path == "/api/auth.json":
-            return httpx.Response(200, json={"success": True, "token": "AUTOTOK"})
-        return handler(request)
-
-    http = httpx.AsyncClient(transport=httpx.MockTransport(wrapped))
-    return SpoterClient(http, email="e@x", password="pw", cache=TokenCache()), http
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    client = SpoterClient(http)
+    # Los tests de actions ejercitan sub-instances varias; seedeamos las
+    # habituales para evitar SpoterAuthError.
+    for instance in ("95", "26434"):
+        client.set_token("hub.spoter.com.ar", instance, "AUTOTOK")
+    return client, http
 
 
 async def test_success_returns_id_original_uuid():
@@ -110,10 +108,6 @@ async def test_omits_nombre_sugerido_when_empty():
 
 
 async def test_uses_sub_instance_for_auth_token_selection():
-    cache = TokenCache()
-    cache.set("hub.spoter.com.ar", "26434", "SUB_TOKEN")
-    cache.set("hub.spoter.com.ar", "95", "ROOT_TOKEN")
-
     captured = {}
 
     def handler(request):
@@ -121,7 +115,9 @@ async def test_uses_sub_instance_for_auth_token_selection():
         return httpx.Response(200, json={"success": True})
 
     http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    client = SpoterClient(http, email="e@x", password="pw", cache=cache)
+    client = SpoterClient(http)
+    client.set_token("hub.spoter.com.ar", "26434", "SUB_TOKEN")
+    client.set_token("hub.spoter.com.ar", "95", "ROOT_TOKEN")
     async with http:
         await emit_agregar_nota(
             client,

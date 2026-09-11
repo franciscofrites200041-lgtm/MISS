@@ -4,13 +4,16 @@ import httpx
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.spoter import SpoterClient, TokenCache
+from app.spoter import SpoterClient
 
 
 REAL_PAYLOAD = {
     "instance": "95",
     "async": 1,
-    "datos_conexion": {"mass_url": "https://hub.spoter.com.ar/api/mass.json"},
+    "datos_conexion": {
+        "mass_url": "https://hub.spoter.com.ar/api/mass.json",
+        "token": "E2E-PAYLOAD-TOKEN-1234567890",
+    },
     "event_type": "transcript_audio",
     "datos_instancias": {
         "instance": "26434",
@@ -59,9 +62,7 @@ class FakeSpoterUniverse:
 
 def _override_app_deps(fake: FakeSpoterUniverse):
     app.state.http = httpx.AsyncClient(transport=httpx.MockTransport(fake.handler))
-    app.state.spoter = SpoterClient(
-        app.state.http, email="e@x", password="pw", cache=TokenCache()
-    )
+    app.state.spoter = SpoterClient(app.state.http)
 
 
 def test_e2e_webhook_transcribes_and_emits_note(monkeypatch):
