@@ -8,6 +8,9 @@ from pathlib import Path
 from typing import AsyncIterator
 
 import logging
+import time
+from contextvars import ContextVar
+from datetime import datetime, timezone
 
 import httpx
 from fastapi import (
@@ -36,6 +39,31 @@ class _AccessNoiseFilter(logging.Filter):
 
 
 logging.getLogger("uvicorn.access").addFilter(_AccessNoiseFilter())
+
+
+# ContextVar propagado al background task: cada request outbound del pipeline
+# se registra en la run activa vía event_hooks del httpx.AsyncClient.
+_current_run: ContextVar[tuple[str, object] | None] = ContextVar(
+    "miss_current_run", default=None,
+)
+
+
+async def _record_outbound(response: httpx.Response) -> None:
+    ctx = _current_run.get()
+    if ctx is None:
+        return
+    run_id, store = ctx
+    try:
+        ms = int(response.elapsed.total_seconds() * 1000) if response.elapsed else None
+    except Exception:
+        ms = None
+    await store.append_outbound_call(run_id, {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "method": response.request.method,
+        "url": str(response.request.url),
+        "status": response.status_code,
+        "ms": ms,
+    })
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
@@ -66,7 +94,7 @@ def _build_spoter(http: httpx.AsyncClient) -> SpoterClient:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    http = httpx.AsyncClient()
+    http = httpx.AsyncClient(event_hooks={"response": [_record_outbound]})
     app.state.http = http
     app.state.spoter = _build_spoter(http)
     app.state.config = _load_config()
@@ -201,14 +229,20 @@ def verify_webhook_secret(x_webhook_secret: str | None = Header(default=None)) -
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
 
 
-async def _run_pipeline(payload: SpoterWebhookPayload, app: FastAPI) -> None:
+async def _run_pipeline(
+    payload: SpoterWebhookPayload,
+    raw_body: dict,
+    app: FastAPI,
+) -> None:
     await process_webhook(
         payload,
+        raw_payload=raw_body,
         http=app.state.http,
         spoter=app.state.spoter,
         config=app.state.config,
         tools=app.state.tools,
         store=app.state.store,
+        run_context=_current_run,
     )
 
 
@@ -222,5 +256,9 @@ async def spoter_webhook(
     background: BackgroundTasks,
     request: Request,
 ):
-    background.add_task(_run_pipeline, payload, request.app)
+    try:
+        raw_body = await request.json()
+    except Exception:
+        raw_body = {}
+    background.add_task(_run_pipeline, payload, raw_body, request.app)
     return {"status": "accepted"}

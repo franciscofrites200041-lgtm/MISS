@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -25,11 +26,20 @@ CREATE TABLE IF NOT EXISTS runs (
     transcription_duration_seconds REAL,
     contact_name TEXT,
     mass_id_original TEXT,
-    error_message TEXT
+    error_message TEXT,
+    raw_payload TEXT,
+    outbound_calls TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
 """
+
+# Migraciones idempotentes para bases anteriores. SQLite tolera ALTER TABLE
+# ADD COLUMN; el try/except cubre el caso "ya existe".
+_MIGRATIONS = [
+    "ALTER TABLE runs ADD COLUMN raw_payload TEXT",
+    "ALTER TABLE runs ADD COLUMN outbound_calls TEXT",
+]
 
 
 @dataclass
@@ -50,6 +60,8 @@ class Run:
     contact_name: str | None
     mass_id_original: str | None
     error_message: str | None
+    raw_payload: str | None = None
+    outbound_calls: str | None = None
 
 
 def _now() -> str:
@@ -67,6 +79,11 @@ class RunStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         async with aiosqlite.connect(self.path) as db:
             await db.executescript(SCHEMA)
+            for stmt in _MIGRATIONS:
+                try:
+                    await db.execute(stmt)
+                except aiosqlite.OperationalError:
+                    pass  # columna ya existe
             await db.commit()
 
     async def create(
@@ -127,6 +144,29 @@ class RunStore:
 
     async def mark_skipped(self, run_id: str, *, reason: str) -> None:
         await self._patch(run_id, status="skipped", error_message=reason)
+
+    async def set_raw_payload(self, run_id: str, payload: dict) -> None:
+        await self._patch(run_id, raw_payload=json.dumps(payload, ensure_ascii=False))
+
+    async def append_outbound_call(self, run_id: str, call: dict) -> None:
+        """Agrega una fila al JSON array outbound_calls de esta run.
+        ponytail: SQLite no tiene json_array_append portable en <3.38, así que
+        leemos-mutamos-escribimos. Como cada run es serial (background task),
+        no hay race real."""
+        async with aiosqlite.connect(self.path) as db:
+            async with db.execute(
+                "SELECT outbound_calls FROM runs WHERE id = ?", (run_id,)
+            ) as cur:
+                row = await cur.fetchone()
+            if row is None:
+                return
+            current = json.loads(row[0]) if row[0] else []
+            current.append(call)
+            await db.execute(
+                "UPDATE runs SET outbound_calls = ?, updated_at = ? WHERE id = ?",
+                (json.dumps(current, ensure_ascii=False), _now(), run_id),
+            )
+            await db.commit()
 
     async def get(self, run_id: str) -> Run | None:
         async with aiosqlite.connect(self.path) as db:

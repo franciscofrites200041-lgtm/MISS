@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from contextvars import ContextVar
 from dataclasses import dataclass
 
 from urllib.parse import urlparse
@@ -43,6 +44,8 @@ async def process_webhook(
     config: PipelineConfig,
     tools: ToolsStore,
     store: RunStore | None = None,
+    raw_payload: dict | None = None,
+    run_context: ContextVar | None = None,
 ) -> None:
     """Orquesta el flujo de MISS: extraer adjunto -> dispatch a la tool por
     attachment.kind -> generar texto -> resolver contacto -> emitir agregar_nota.
@@ -57,6 +60,10 @@ async def process_webhook(
             phone=target.phone if target else "",
             event_type=payload.event_type,
         )
+        if raw_payload is not None:
+            await store.set_raw_payload(run_id, raw_payload)
+        if run_context is not None:
+            run_context.set((run_id, store))
 
     async def skip(reason: str) -> None:
         logger.info(reason)

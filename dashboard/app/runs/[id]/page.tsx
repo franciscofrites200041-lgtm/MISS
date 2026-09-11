@@ -3,7 +3,7 @@ import { ChevronLeft, AlertCircle } from "lucide-react";
 import { notFound } from "next/navigation";
 
 import { fetchRun } from "@/lib/api";
-import type { RunStatus } from "@/lib/types";
+import type { OutboundCall, RunStatus } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -102,7 +102,85 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
             </div>
           </div>
         )}
+
+        {run.raw_payload && (
+          <div className="border-t border-white/5 px-5 py-4">
+            <div className="mb-2 text-xs uppercase tracking-wide text-slate-500">
+              Payload recibido
+            </div>
+            <pre className="overflow-x-auto rounded-lg bg-slate-950/50 p-4 text-xs text-slate-200">
+              {prettyJson(run.raw_payload)}
+            </pre>
+          </div>
+        )}
+
+        {run.outbound_calls && (
+          <div className="border-t border-white/5 px-5 py-4">
+            <div className="mb-2 text-xs uppercase tracking-wide text-slate-500">
+              Llamadas salientes
+            </div>
+            <OutboundCallsTable json={run.outbound_calls} />
+          </div>
+        )}
       </div>
     </main>
+  );
+}
+
+function prettyJson(raw: string): string {
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2);
+  } catch {
+    return raw;
+  }
+}
+
+function OutboundCallsTable({ json }: { json: string }) {
+  let calls: OutboundCall[] = [];
+  try {
+    calls = JSON.parse(json) as OutboundCall[];
+  } catch {
+    return <div className="text-sm text-red-300">JSON inválido</div>;
+  }
+  if (calls.length === 0) {
+    return <div className="text-sm text-slate-500">Sin llamadas salientes.</div>;
+  }
+  return (
+    <div className="overflow-x-auto rounded-lg bg-slate-950/50">
+      <table className="w-full text-xs">
+        <thead className="text-slate-500">
+          <tr>
+            <th className="px-3 py-2 text-left">Hora</th>
+            <th className="px-3 py-2 text-left">Método</th>
+            <th className="px-3 py-2 text-left">URL</th>
+            <th className="px-3 py-2 text-right">Status</th>
+            <th className="px-3 py-2 text-right">ms</th>
+          </tr>
+        </thead>
+        <tbody>
+          {calls.map((c, i) => (
+            <tr key={i} className="border-t border-white/5">
+              <td className="px-3 py-2 text-slate-400 whitespace-nowrap">
+                {new Date(c.ts).toLocaleTimeString("es-AR")}
+              </td>
+              <td className="px-3 py-2 font-mono">{c.method}</td>
+              <td className="px-3 py-2 font-mono break-all">{c.url}</td>
+              <td
+                className={
+                  c.status >= 400
+                    ? "px-3 py-2 text-right font-mono text-red-300"
+                    : "px-3 py-2 text-right font-mono text-emerald-300"
+                }
+              >
+                {c.status}
+              </td>
+              <td className="px-3 py-2 text-right font-mono text-slate-400">
+                {c.ms ?? "—"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

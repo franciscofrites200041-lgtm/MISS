@@ -22,6 +22,16 @@ export interface Run {
   contact_name: string | null;
   mass_id_original: string | null;
   error_message: string | null;
+  raw_payload: string | null;
+  outbound_calls: string | null;
+}
+
+export interface OutboundCall {
+  ts: string;
+  method: string;
+  url: string;
+  status: number;
+  ms: number | null;
 }
 
 export interface RunsPage {
