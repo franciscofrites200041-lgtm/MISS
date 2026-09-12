@@ -6,6 +6,7 @@ import httpx
 from app import describe
 from app.describe import (
     DescriptionError,
+    describe_document,
     describe_document_bytes,
     describe_image_bytes,
 )
@@ -109,3 +110,22 @@ async def test_describe_document_bytes_rejects_non_pdf_without_text():
             assert False, "debería haber levantado DescriptionError"
         except DescriptionError as exc:
             assert "no soportado" in str(exc)
+
+
+async def test_describe_document_query_string_url_detects_pdf_from_filename(monkeypatch):
+    monkeypatch.setattr(describe, "_try_extract_pdf_text", lambda raw: "")
+    seen = []
+    http = httpx.AsyncClient(transport=httpx.MockTransport(_chat_handler(seen)))
+    async with http:
+        result = await describe_document(
+            "https://hub.example.com/files/presupuesto.pdf?X-Goog-Signature=abc",
+            http=http, api_key="sk",
+            model="google/gemini-2.5-flash",
+            prompt="resumí",
+        )
+    assert result.latency_ms is not None
+    assert seen[0].url.path == "/files/presupuesto.pdf"
+    body = json.loads(seen[1].content)
+    content = body["messages"][0]["content"]
+    file_part = next(p for p in content if p["type"] == "file")
+    assert file_part["file"]["filename"] == "presupuesto.pdf"

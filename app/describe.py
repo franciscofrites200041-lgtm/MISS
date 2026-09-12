@@ -162,7 +162,8 @@ async def describe_document_bytes(
     upload_timeout: float = 60.0,
 ) -> Description:
     ct = (content_type or "").split(";", 1)[0].strip().lower()
-    is_pdf = ct == "application/pdf" or (filename or "").lower().endswith(".pdf")
+    name = (filename or "").split("?", 1)[0].rsplit("/", 1)[-1] or "documento.pdf"
+    is_pdf = ct == "application/pdf" or name.lower().endswith(".pdf")
 
     text = _try_extract_pdf_text(raw) if is_pdf else ""
     if len(text) >= _PDF_TEXT_MIN_CHARS:
@@ -177,7 +178,6 @@ async def describe_document_bytes(
         )
 
     b64 = base64.b64encode(raw).decode("ascii")
-    name = filename or "documento.pdf"
     content = [
         {"type": "text", "text": prompt},
         {
