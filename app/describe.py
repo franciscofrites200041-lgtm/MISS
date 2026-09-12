@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import io
 import logging
+import time
 from dataclasses import dataclass
 
 import httpx
@@ -23,6 +24,7 @@ class Description:
     text: str
     cost_usd: float | None
     model: str
+    latency_ms: float | None = None
 
 
 class DescriptionError(Exception):
@@ -37,6 +39,7 @@ async def _chat(
     content: list[dict],
     timeout: float,
 ) -> Description:
+    started = time.perf_counter()
     try:
         response = await http.post(
             OPENROUTER_CHAT_URL,
@@ -74,10 +77,15 @@ async def _chat(
         raise DescriptionError("OpenRouter devolvió choices vacío")
     text = (choices[0].get("message") or {}).get("content") or ""
     usage = data.get("usage") or {}
+    try:
+        latency_ms = int(response.elapsed.total_seconds() * 1000)
+    except RuntimeError:
+        latency_ms = int((time.perf_counter() - started) * 1000)
     return Description(
         text=text.strip(),
         cost_usd=usage.get("cost"),
         model=model,
+        latency_ms=latency_ms,
     )
 
 
@@ -93,6 +101,27 @@ async def describe_image(
     content = [
         {"type": "text", "text": prompt},
         {"type": "image_url", "image_url": {"url": image_url}},
+    ]
+    return await _chat(
+        http=http, api_key=api_key, model=model, content=content, timeout=timeout
+    )
+
+
+async def describe_image_bytes(
+    raw: bytes,
+    *,
+    http: httpx.AsyncClient,
+    api_key: str,
+    model: str,
+    prompt: str,
+    content_type: str | None = None,
+    timeout: float = 45.0,
+) -> Description:
+    mime = (content_type or "image/jpeg").split(";", 1)[0].strip().lower() or "image/jpeg"
+    b64 = base64.b64encode(raw).decode("ascii")
+    content = [
+        {"type": "text", "text": prompt},
+        {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
     ]
     return await _chat(
         http=http, api_key=api_key, model=model, content=content, timeout=timeout
@@ -121,6 +150,49 @@ def _try_extract_pdf_text(raw: bytes) -> str:
         return ""
 
 
+async def describe_document_bytes(
+    raw: bytes,
+    *,
+    http: httpx.AsyncClient,
+    api_key: str,
+    model: str,
+    prompt: str,
+    content_type: str | None = None,
+    filename: str | None = "documento.pdf",
+    upload_timeout: float = 60.0,
+) -> Description:
+    ct = (content_type or "").split(";", 1)[0].strip().lower()
+    is_pdf = ct == "application/pdf" or (filename or "").lower().endswith(".pdf")
+
+    text = _try_extract_pdf_text(raw) if is_pdf else ""
+    if len(text) >= _PDF_TEXT_MIN_CHARS:
+        content = [{"type": "text", "text": f"{prompt}\n\nDocumento:\n{text}"}]
+        return await _chat(
+            http=http, api_key=api_key, model=model, content=content, timeout=upload_timeout
+        )
+
+    if not is_pdf:
+        raise DescriptionError(
+            f"Tipo de documento no soportado (content-type={content_type!r})"
+        )
+
+    b64 = base64.b64encode(raw).decode("ascii")
+    name = filename or "documento.pdf"
+    content = [
+        {"type": "text", "text": prompt},
+        {
+            "type": "file",
+            "file": {
+                "filename": name,
+                "file_data": f"data:application/pdf;base64,{b64}",
+            },
+        },
+    ]
+    return await _chat(
+        http=http, api_key=api_key, model=model, content=content, timeout=upload_timeout
+    )
+
+
 async def describe_document(
     document_url: str,
     *,
@@ -140,34 +212,10 @@ async def describe_document(
             f"Descarga rechazada (HTTP {download.status_code}) para {document_url}"
         )
 
-    content_type = (download.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
-    is_pdf = content_type == "application/pdf" or document_url.lower().split("?", 1)[0].endswith(".pdf")
-
-    text = _try_extract_pdf_text(download.content) if is_pdf else ""
-    if len(text) >= _PDF_TEXT_MIN_CHARS:
-        content = [{"type": "text", "text": f"{prompt}\n\nDocumento:\n{text}"}]
-        return await _chat(
-            http=http, api_key=api_key, model=model, content=content, timeout=upload_timeout
-        )
-
-    # PDF sin texto (escaneado) o no-PDF: mandarlo entero al modelo vision.
-    if not is_pdf:
-        raise DescriptionError(
-            f"Tipo de documento no soportado (content-type={content_type!r})"
-        )
-
-    b64 = base64.b64encode(download.content).decode("ascii")
-    filename = document_url.rsplit("/", 1)[-1].split("?", 1)[0] or "documento.pdf"
-    content = [
-        {"type": "text", "text": prompt},
-        {
-            "type": "file",
-            "file": {
-                "filename": filename,
-                "file_data": f"data:application/pdf;base64,{b64}",
-            },
-        },
-    ]
-    return await _chat(
-        http=http, api_key=api_key, model=model, content=content, timeout=upload_timeout
+    return await describe_document_bytes(
+        download.content,
+        http=http, api_key=api_key, model=model, prompt=prompt,
+        content_type=download.headers.get("content-type"),
+        filename=document_url,
+        upload_timeout=upload_timeout,
     )
