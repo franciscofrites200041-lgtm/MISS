@@ -18,10 +18,13 @@ from fastapi import (
     Body,
     Depends,
     FastAPI,
+    File,
+    Form,
     Header,
     HTTPException,
     Query,
     Request,
+    UploadFile,
     status,
 )
 
@@ -279,6 +282,131 @@ def _empty_stats() -> dict:
     return {
         "total": 0, "completed": 0, "failed": 0, "skipped": 0,
         "total_cost_usd": 0.0, "total_duration_seconds": 0.0,
+    }
+
+
+_MAX_TEST_SIZE_BYTES = 20 * 1024 * 1024
+
+_IMAGE_TEST_TYPES = {
+    "image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp",
+}
+_IMAGE_TEST_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
+_DOCUMENT_TEST_TYPE = "application/pdf"
+
+logger_test = logging.getLogger("miss.test")
+
+
+def _validate_test_file(kind: str, content_type: str | None, filename: str | None, size: int) -> None:
+    ct = (content_type or "").split(";", 1)[0].strip().lower()
+    name = filename or ""
+    if size > _MAX_TEST_SIZE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"archivo demasiado grande (máx {_MAX_TEST_SIZE_BYTES // (1024 * 1024)} MB)",
+        )
+    if kind == "audio":
+        from app.transcription import _format_from_content_type, _format_from_url
+        if _format_from_content_type(ct) is None and _format_from_url(f"https://x/{name}") is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="tipo de audio no soportado",
+            )
+    elif kind == "image":
+        ext = "." + name.rsplit(".", 1)[-1].lower() if "." in name else ""
+        if ct not in _IMAGE_TEST_TYPES and ext not in _IMAGE_TEST_EXTENSIONS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="tipo de imagen no soportado",
+            )
+    elif kind == "document":
+        if ct != _DOCUMENT_TEST_TYPE and not name.lower().endswith(".pdf"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="solo se aceptan PDFs para documentos",
+            )
+
+
+@app.post("/api/tools/{slug}/test", dependencies=[Depends(verify_dashboard_auth)])
+async def api_test_tool(
+    request: Request,
+    slug: str,
+    file: UploadFile | None = File(default=None),
+    model: str | None = Form(default=None),
+):
+    from app.transcription import TranscriptionError, transcribe_bytes
+    from app.describe import DescriptionError, describe_image_bytes, describe_document_bytes
+
+    tool = await request.app.state.tools.get(slug)
+    if tool is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    api_key = request.app.state.config.openrouter_api_key
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="OPENROUTER_API_KEY not configured",
+        )
+    if file is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="archivo requerido",
+        )
+
+    raw = await file.read()
+    await file.close()
+    _validate_test_file(tool.kind, file.content_type, file.filename, len(raw))
+
+    chosen = (model or "").strip() or tool.model
+    http = request.app.state.http
+
+    text: str
+    cost_usd: float | None
+    duration_seconds: float | None
+    latency_ms: float | None
+
+    try:
+        if tool.kind == "audio":
+            result = await transcribe_bytes(
+                raw, http=http, api_key=api_key, model=chosen,
+                content_type=file.content_type, filename=file.filename,
+            )
+            text = result.text
+            cost_usd = result.cost_usd
+            duration_seconds = result.duration_seconds
+            latency_ms = result.latency_ms
+        else:
+            if tool.kind == "image":
+                description = await describe_image_bytes(
+                    raw, http=http, api_key=api_key, model=chosen,
+                    prompt=tool.prompt or "", content_type=file.content_type,
+                )
+            else:  # document
+                description = await describe_document_bytes(
+                    raw, http=http, api_key=api_key, model=chosen,
+                    prompt=tool.prompt or "", content_type=file.content_type,
+                    filename=file.filename,
+                )
+            text = description.text
+            cost_usd = description.cost_usd
+            duration_seconds = None
+            latency_ms = description.latency_ms
+    except (TranscriptionError, DescriptionError) as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+
+    logger_test.info(
+        "tool test slug=%s kind=%s file=%s size=%d model=%s cost=%s latency_ms=%s dur=%s",
+        slug, tool.kind, file.filename, len(raw), chosen, cost_usd, latency_ms, duration_seconds,
+    )
+    return {
+        "model": chosen,
+        "text": text,
+        "cost_usd": cost_usd,
+        "duration_seconds": duration_seconds,
+        "latency_ms": latency_ms,
+        "file": {
+            "name": file.filename,
+            "size": len(raw),
+            "content_type": file.content_type,
+        },
     }
 
 
