@@ -3,8 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Save, Power, Loader2, Check, AlertCircle } from "lucide-react";
-import { fetchModels } from "@/lib/api";
-import type { LlmModel, ToolDetail } from "@/lib/types";
+import type { LlmModel, LlmModelsResponse, ToolDetail } from "@/lib/types";
 
 export default function ToolEditor({ tool }: { tool: ToolDetail }) {
   const router = useRouter();
@@ -23,8 +22,12 @@ export default function ToolEditor({ tool }: { tool: ToolDetail }) {
 
   useEffect(() => {
     let cancelled = false;
-    fetchModels(tool.kind)
-      .then((data) => {
+    fetch(`/api/models?kind=${encodeURIComponent(tool.kind)}`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((data: LlmModelsResponse) => {
         if (cancelled) return;
         const fallback: LlmModel = { id: tool.model, name: tool.model };
         const hasCurrent = data.models.some((m) => m.id === tool.model);

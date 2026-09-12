@@ -6,8 +6,8 @@ export async function POST(
   { params }: { params: Promise<{ slug: string }> },
 ) {
   const { slug } = await params;
-  const formData = await req.formData();
   try {
+    const formData = await req.formData();
     const result = await testTool(slug, formData);
     return NextResponse.json(result);
   } catch (e) {

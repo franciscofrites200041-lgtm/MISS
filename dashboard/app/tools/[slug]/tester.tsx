@@ -2,8 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Play, Loader2, AlertCircle, FileUp } from "lucide-react";
-import { fetchModels, testTool } from "@/lib/api";
-import type { LlmModel, ToolTestResult } from "@/lib/types";
+import type { LlmModel, LlmModelsResponse, ToolTestResult } from "@/lib/types";
 
 const ACCEPT: Record<string, string> = {
   audio: "audio/*",
@@ -33,6 +32,7 @@ export default function Tester({
   currentModel: string;
 }) {
   const [models, setModels] = useState<LlmModel[]>([]);
+  const [modelsError, setModelsError] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [modelChoice, setModelChoice] = useState("");
   const [loading, setLoading] = useState(false);
@@ -41,11 +41,19 @@ export default function Tester({
 
   useEffect(() => {
     let cancelled = false;
-    fetchModels(kind)
-      .then((data) => {
+    fetch(`/api/models?kind=${encodeURIComponent(kind)}`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((data: LlmModelsResponse) => {
         if (!cancelled) setModels(data.models);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) {
+          setModelsError("No se pudo cargar el catálogo de modelos.");
+        }
+      });
     return () => {
       cancelled = true;
     };
@@ -70,7 +78,19 @@ export default function Tester({
       const formData = new FormData();
       formData.append("file", file);
       formData.append("model", modelChoice);
-      setResult(await testTool(slug, formData));
+      const res = await fetch(
+        `/api/tools/${encodeURIComponent(slug)}/test`,
+        { method: "POST", body: formData }
+      );
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`;
+        try {
+          const body = await res.json();
+          if (body && typeof body.error === "string" && body.error) msg = body.error;
+        } catch {}
+        throw new Error(msg);
+      }
+      setResult(await (res.json() as Promise<ToolTestResult>));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -120,6 +140,12 @@ export default function Tester({
                 </option>
               ))}
             </select>
+            {modelsError && (
+              <p className="mt-1 flex items-center gap-1 text-xs text-amber-300">
+                <AlertCircle className="h-3.5 w-3.5" />
+                {modelsError}
+              </p>
+            )}
           </div>
         </div>
 
