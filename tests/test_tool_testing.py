@@ -201,3 +201,29 @@ def test_tool_test_returns_502_without_api_key(monkeypatch):
         )
     assert response.status_code == 502
     assert "OPENROUTER_API_KEY" in response.json()["detail"]
+
+
+def test_tool_test_missing_file_returns_400(monkeypatch):
+    _set_creds(monkeypatch)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
+    with TestClient(app) as client:
+        client.app.state.http = _make_client(_openrouter([]))
+        response = client.post("/api/tools/audio/test", headers=AUTH_HEADER)
+    assert response.status_code == 400
+    assert "archivo" in response.json()["detail"]
+
+
+def test_tool_test_image_derives_mime_from_extension(monkeypatch):
+    _set_creds(monkeypatch)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
+    seen = []
+    with TestClient(app) as client:
+        client.app.state.http = _make_client(_openrouter(seen, chat=True))
+        response = client.post(
+            "/api/tools/image/test",
+            headers=AUTH_HEADER,
+            files={"file": ("foto.png", IMAGE_BYTES, "application/octet-stream")},
+        )
+
+    assert response.status_code == 200
+    assert b"data:image/png;base64," in seen[0].content

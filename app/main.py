@@ -291,9 +291,30 @@ _IMAGE_TEST_TYPES = {
     "image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp",
 }
 _IMAGE_TEST_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
+_IMAGE_EXTENSION_MIME = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+    ".bmp": "image/bmp",
+}
 _DOCUMENT_TEST_TYPE = "application/pdf"
 
 logger_test = logging.getLogger("miss.test")
+
+
+def _test_file_too_large_detail() -> str:
+    return f"archivo demasiado grande (máx {_MAX_TEST_SIZE_BYTES // (1024 * 1024)} MB)"
+
+
+def _image_mime_for(content_type: str | None, filename: str | None) -> str:
+    ct = (content_type or "").split(";", 1)[0].strip().lower()
+    name = filename or ""
+    ext = "." + name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    if ct in _IMAGE_TEST_TYPES:
+        return ct
+    return _IMAGE_EXTENSION_MIME.get(ext, "image/jpeg")
 
 
 def _validate_test_file(kind: str, content_type: str | None, filename: str | None, size: int) -> None:
@@ -302,7 +323,7 @@ def _validate_test_file(kind: str, content_type: str | None, filename: str | Non
     if size > _MAX_TEST_SIZE_BYTES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"archivo demasiado grande (máx {_MAX_TEST_SIZE_BYTES // (1024 * 1024)} MB)",
+            detail=_test_file_too_large_detail(),
         )
     if kind == "audio":
         from app.transcription import _format_from_content_type, _format_from_url
@@ -351,9 +372,21 @@ async def api_test_tool(
             detail="archivo requerido",
         )
 
-    raw = await file.read()
+    raw = bytearray()
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        raw.extend(chunk)
+        if len(raw) > _MAX_TEST_SIZE_BYTES:
+            await file.close()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=_test_file_too_large_detail(),
+            )
     await file.close()
     _validate_test_file(tool.kind, file.content_type, file.filename, len(raw))
+    payload = bytes(raw)
 
     chosen = (model or "").strip() or tool.model
     http = request.app.state.http
@@ -366,7 +399,7 @@ async def api_test_tool(
     try:
         if tool.kind == "audio":
             result = await transcribe_bytes(
-                raw, http=http, api_key=api_key, model=chosen,
+                payload, http=http, api_key=api_key, model=chosen,
                 content_type=file.content_type, filename=file.filename,
             )
             text = result.text
@@ -376,12 +409,13 @@ async def api_test_tool(
         else:
             if tool.kind == "image":
                 description = await describe_image_bytes(
-                    raw, http=http, api_key=api_key, model=chosen,
-                    prompt=tool.prompt or "", content_type=file.content_type,
+                    payload, http=http, api_key=api_key, model=chosen,
+                    prompt=tool.prompt or "",
+                    content_type=_image_mime_for(file.content_type, file.filename),
                 )
             else:  # document
                 description = await describe_document_bytes(
-                    raw, http=http, api_key=api_key, model=chosen,
+                    payload, http=http, api_key=api_key, model=chosen,
                     prompt=tool.prompt or "", content_type=file.content_type,
                     filename=file.filename,
                 )
