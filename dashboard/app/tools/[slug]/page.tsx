@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { fetchTool } from "@/lib/api";
 import type { Run, RunStatus } from "@/lib/types";
 import ToolEditor from "./editor";
+import Tester from "./tester";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -111,6 +112,10 @@ export default async function ToolDetailPage({
             )}
           </div>
         </aside>
+      </div>
+
+      <div className="mt-6">
+        <Tester slug={tool.slug} kind={tool.kind} currentModel={tool.model} />
       </div>
     </main>
   );
