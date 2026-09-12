@@ -4,7 +4,7 @@ import json
 import httpx
 import pytest
 
-from app.transcription import Transcription, TranscriptionError, transcribe
+from app.transcription import Transcription, TranscriptionError, transcribe, transcribe_bytes
 
 
 AUDIO_BYTES = b"\xff\xfb\x90\x00fake mp3 bytes"
@@ -182,3 +182,54 @@ async def test_download_uses_get_and_openrouter_uses_post():
     assert download.method == "GET"
     assert upload.method == "POST"
     assert str(upload.url) == OPENROUTER_URL
+
+
+async def test_transcribe_bytes_sends_bytes_and_reports_latency():
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(200, json={
+            "text": "hola desde bytes",
+            "usage": {"seconds": 1.5, "cost": 0.0001},
+        })
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    async with http:
+        result = await transcribe_bytes(
+            AUDIO_BYTES,
+            http=http, api_key="sk-or-abc",
+            model="openai/whisper-1",
+            content_type="audio/ogg",
+            filename="nota.ogg",
+        )
+
+    assert result.text == "hola desde bytes"
+    assert result.duration_seconds == 1.5
+    assert result.cost_usd == 0.0001
+    assert result.model == "openai/whisper-1"
+    assert result.latency_ms is not None
+    body = json.loads(seen[0].content)
+    assert body["input_audio"]["data"] == base64.b64encode(AUDIO_BYTES).decode("ascii")
+    assert body["input_audio"]["format"] == "ogg"
+    assert body["model"] == "openai/whisper-1"
+    assert seen[0].headers["authorization"] == "Bearer sk-or-abc"
+
+
+async def test_transcribe_bytes_format_from_filename_when_no_content_type():
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(200, json={"text": "ok", "usage": {"seconds": 1.0}})
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    async with http:
+        await transcribe_bytes(
+            AUDIO_BYTES, http=http, api_key="sk",
+            model="openai/whisper-1", content_type=None,
+            filename="nota.m4a",
+        )
+
+    body = json.loads(seen[0].content)
+    assert body["input_audio"]["format"] == "m4a"

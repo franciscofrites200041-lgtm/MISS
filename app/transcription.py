@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import time
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
@@ -43,6 +44,7 @@ class Transcription:
     duration_seconds: float | None
     cost_usd: float | None
     model: str
+    latency_ms: float | None = None
 
 
 class TranscriptionError(Exception):
@@ -64,32 +66,25 @@ def _format_from_url(url: str) -> str | None:
     return None
 
 
-async def transcribe(
-    audio_url: str,
+async def transcribe_bytes(
+    audio_bytes: bytes,
     *,
     http: httpx.AsyncClient,
     api_key: str,
-    model: str = DEFAULT_MODEL,
+    model: str,
+    content_type: str | None = None,
+    filename: str | None = None,
     default_format: str = "wav",
-    download_timeout: float = 30.0,
     upload_timeout: float = 45.0,
 ) -> Transcription:
-    try:
-        download = await http.get(audio_url, timeout=download_timeout)
-    except httpx.HTTPError as e:
-        raise TranscriptionError(f"No se pudo descargar el audio: {e}") from e
-    if download.status_code >= 400:
-        raise TranscriptionError(
-            f"Descarga rechazada (HTTP {download.status_code}) para {audio_url}"
-        )
-
     audio_format = (
-        _format_from_content_type(download.headers.get("content-type"))
-        or _format_from_url(audio_url)
+        _format_from_content_type(content_type)
+        or _format_from_url(filename or "")
         or default_format
     )
-    audio_b64 = base64.b64encode(download.content).decode("ascii")
+    audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
 
+    started = time.perf_counter()
     try:
         response = await http.post(
             OPENROUTER_URL,
@@ -121,9 +116,42 @@ async def transcribe(
         )
 
     usage = data.get("usage") or {}
+    try:
+        latency_ms = int(response.elapsed.total_seconds() * 1000)
+    except RuntimeError:
+        latency_ms = int((time.perf_counter() - started) * 1000)
     return Transcription(
         text=data.get("text") or "",
         duration_seconds=usage.get("seconds"),
         cost_usd=usage.get("cost"),
         model=model,
+        latency_ms=latency_ms,
+    )
+
+
+async def transcribe(
+    audio_url: str,
+    *,
+    http: httpx.AsyncClient,
+    api_key: str,
+    model: str = DEFAULT_MODEL,
+    default_format: str = "wav",
+    download_timeout: float = 30.0,
+    upload_timeout: float = 45.0,
+) -> Transcription:
+    try:
+        download = await http.get(audio_url, timeout=download_timeout)
+    except httpx.HTTPError as e:
+        raise TranscriptionError(f"No se pudo descargar el audio: {e}") from e
+    if download.status_code >= 400:
+        raise TranscriptionError(
+            f"Descarga rechazada (HTTP {download.status_code}) para {audio_url}"
+        )
+    return await transcribe_bytes(
+        download.content,
+        http=http, api_key=api_key, model=model,
+        content_type=download.headers.get("content-type"),
+        filename=audio_url,
+        default_format=default_format,
+        upload_timeout=upload_timeout,
     )
