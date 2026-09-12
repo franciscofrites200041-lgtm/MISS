@@ -34,7 +34,20 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
     cache: "no-store",
   });
   if (!response.ok) {
-    throw new Error(`MISS API ${path} devolvió ${response.status}`);
+    let detail = "";
+    try {
+      const body = await response.json();
+      if (body && typeof body.detail === "string" && body.detail) {
+        detail = body.detail;
+      } else if (body && typeof body.error === "string" && body.error) {
+        detail = body.error;
+      }
+    } catch {}
+    throw new Error(
+      detail
+        ? `MISS API ${path} devolvió ${response.status}: ${detail}`
+        : `MISS API ${path} devolvió ${response.status}`
+    );
   }
   return response.json() as Promise<T>;
 }
