@@ -287,18 +287,6 @@ def _empty_stats() -> dict:
 
 _MAX_TEST_SIZE_BYTES = 20 * 1024 * 1024
 
-_IMAGE_TEST_TYPES = {
-    "image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp",
-}
-_IMAGE_TEST_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
-_IMAGE_EXTENSION_MIME = {
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".webp": "image/webp",
-    ".gif": "image/gif",
-    ".bmp": "image/bmp",
-}
 _DOCUMENT_TEST_TYPE = "application/pdf"
 
 logger_test = logging.getLogger("miss.test")
@@ -306,15 +294,6 @@ logger_test = logging.getLogger("miss.test")
 
 def _test_file_too_large_detail() -> str:
     return f"archivo demasiado grande (máx {_MAX_TEST_SIZE_BYTES // (1024 * 1024)} MB)"
-
-
-def _image_mime_for(content_type: str | None, filename: str | None) -> str:
-    ct = (content_type or "").split(";", 1)[0].strip().lower()
-    name = filename or ""
-    ext = "." + name.rsplit(".", 1)[-1].lower() if "." in name else ""
-    if ct in _IMAGE_TEST_TYPES:
-        return ct
-    return _IMAGE_EXTENSION_MIME.get(ext, "image/jpeg")
 
 
 def _validate_test_file(kind: str, content_type: str | None, filename: str | None, size: int) -> None:
@@ -332,13 +311,6 @@ def _validate_test_file(kind: str, content_type: str | None, filename: str | Non
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="tipo de audio no soportado",
             )
-    elif kind == "image":
-        ext = "." + name.rsplit(".", 1)[-1].lower() if "." in name else ""
-        if ct not in _IMAGE_TEST_TYPES and ext not in _IMAGE_TEST_EXTENSIONS:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="tipo de imagen no soportado",
-            )
     elif kind == "document":
         if ct != _DOCUMENT_TEST_TYPE and not name.lower().endswith(".pdf"):
             raise HTTPException(
@@ -355,11 +327,20 @@ async def api_test_tool(
     model: str | None = Form(default=None),
 ):
     from app.transcription import TranscriptionError, transcribe_bytes
-    from app.describe import DescriptionError, describe_image_bytes, describe_document_bytes
+    from app.describe import (
+        DescriptionError,
+        DescriptionSkip,
+        describe_document_bytes,
+    )
 
     tool = await request.app.state.tools.get(slug)
     if tool is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    if tool.kind == "image":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="imágenes no soportadas: MISS solo procesa audio y PDFs con texto",
+        )
     api_key = request.app.state.config.openrouter_api_key
     if not api_key:
         raise HTTPException(
@@ -407,24 +388,22 @@ async def api_test_tool(
             duration_seconds = result.duration_seconds
             latency_ms = result.latency_ms
         else:
-            if tool.kind == "image":
-                description = await describe_image_bytes(
-                    payload, http=http, api_key=api_key, model=chosen,
-                    prompt=tool.prompt or "",
-                    content_type=_image_mime_for(file.content_type, file.filename),
-                )
-            else:  # document
-                description = await describe_document_bytes(
-                    payload, http=http, api_key=api_key, model=chosen,
-                    prompt=tool.prompt or "", content_type=file.content_type,
-                    filename=file.filename,
-                )
+            description = await describe_document_bytes(
+                payload, http=http, api_key=api_key, model=chosen,
+                prompt=tool.prompt or "", content_type=file.content_type,
+                filename=file.filename,
+            )
             text = description.text
             cost_usd = description.cost_usd
             duration_seconds = None
             latency_ms = description.latency_ms
+            # El modelo de resumen de PDF se fuerza a Flash; reportamos el real,
+            # no el override del dashboard que fue ignorado.
+            chosen = description.model
     except (TranscriptionError, DescriptionError) as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+    except DescriptionSkip as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
     logger_test.info(
         "tool test slug=%s kind=%s file=%s size=%d model=%s cost=%s latency_ms=%s dur=%s",

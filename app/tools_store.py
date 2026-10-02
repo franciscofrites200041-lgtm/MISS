@@ -28,13 +28,6 @@ CREATE TABLE IF NOT EXISTS model_cache (
 """
 
 # Defaults sembrados en la primera corrida. Editables desde el dashboard.
-_IMAGE_PROMPT_DEFAULT = (
-    "Sos un asistente que describe imágenes para una nota de un CRM. "
-    "Respondé SOLO con la nota final, en español, en 3-4 líneas. "
-    "Describí qué muestra la imagen. Si hay presupuesto, monto, fecha o "
-    "números importantes, mencionalos explícitamente. Sin encabezados ni bullets."
-)
-
 _DOCUMENT_PROMPT_DEFAULT = (
     "Sos un asistente que resume documentos para una nota de un CRM. "
     "Respondé SOLO con la nota final, en español, en 3-4 líneas. "
@@ -52,16 +45,6 @@ SEED_TOOLS: list[dict] = [
         "model": "openai/whisper-large-v3-turbo",
         "prompt": None,
         "note_prefix": "[Transcripción de audio]",
-    },
-    {
-        "slug": "image",
-        "name": "Descripción de imagen",
-        "description": "Describe imágenes de Spoter en 3-4 líneas, resaltando montos y datos importantes.",
-        "kind": "image",
-        "enabled": 1,
-        "model": "google/gemini-2.5-flash",
-        "prompt": _IMAGE_PROMPT_DEFAULT,
-        "note_prefix": "[Descripción de imagen]",
     },
     {
         "slug": "document",
