@@ -11,7 +11,7 @@ import httpx
 from app.actions import SpoterMassRejected, emit_agregar_nota
 from app.attachments import extract_attachment
 from app.contacts import get_contact_by_phone
-from app.describe import DescriptionError, describe_document, describe_image
+from app.describe import DescriptionError, DescriptionSkip, describe_document
 from app.models import SpoterWebhookPayload
 from app.spoter import SpoterAuthError, SpoterClient
 from app.storage import RunStore
@@ -76,7 +76,7 @@ async def process_webhook(
             await store.mark_failed(run_id, error_message=reason)
 
     attachment = extract_attachment(payload)
-    if attachment is None or attachment.kind not in {"audio", "image", "document"}:
+    if attachment is None or attachment.kind not in {"audio", "document"}:
         await skip("no supported attachment")
         return
 
@@ -102,6 +102,9 @@ async def process_webhook(
         )
     except TranscriptionError as exc:
         await fail(f"transcription failed: {exc}")
+        return
+    except DescriptionSkip as exc:
+        await skip(f"attachment skipped: {exc}")
         return
     except DescriptionError as exc:
         await fail(f"description failed: {exc}")
@@ -196,14 +199,6 @@ async def _run_tool(
             prefix=tool.note_prefix,
             cost_usd=transcription.cost_usd,
             duration_seconds=transcription.duration_seconds,
-        )
-    if tool.kind == "image":
-        description = await describe_image(
-            url, http=http, api_key=api_key, model=tool.model,
-            prompt=tool.prompt or "",
-        )
-        return _NoteBuild(
-            text=description.text, prefix=tool.note_prefix, cost_usd=description.cost_usd,
         )
     if tool.kind == "document":
         description = await describe_document(

@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 from app.models import SpoterWebhookPayload
 
-_SUPPORTED_KINDS = frozenset({"audio", "image", "document"})
+_SUPPORTED_KINDS = frozenset({"audio", "document"})
 _AUDIO_PLACEHOLDER = "[AUDIO]"
 
 

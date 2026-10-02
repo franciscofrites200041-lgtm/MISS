@@ -311,7 +311,7 @@ def _payload_with(message):
     return SpoterWebhookPayload.model_validate(body)
 
 
-async def test_image_event_calls_chat_and_emits_note_with_image_prefix(tools):
+async def test_image_event_is_skipped_without_any_llm_call(tools):
     fake = FakeSpoterMulti()
     http, spoter = _wire(fake)
     payload = _payload_with({
@@ -322,14 +322,9 @@ async def test_image_event_calls_chat_and_emits_note_with_image_prefix(tools):
     async with http:
         await process_webhook(payload, http=http, spoter=spoter, config=_config(), tools=tools)
 
-    hit_paths = {(r.url.host, r.url.path) for r in fake.calls}
-    assert ("openrouter.ai", "/api/v1/chat/completions") in hit_paths
-    # No debe llamar al endpoint de transcripción de audio.
-    assert ("openrouter.ai", "/api/v1/audio/transcriptions") not in hit_paths
-
-    action = fake.captured_mass_body["actions"][0]
-    assert action["mensaje_nota"].startswith("[Descripción de imagen] ")
-    assert "Presupuesto por $50.000" in action["mensaje_nota"]
+    hit_hosts = {r.url.host for r in fake.calls}
+    assert "openrouter.ai" not in hit_hosts
+    assert fake.captured_mass_body is None
 
 
 async def test_document_pdf_with_extractable_text_skips_vision(monkeypatch, tools):
@@ -361,9 +356,10 @@ async def test_document_pdf_with_extractable_text_skips_vision(monkeypatch, tool
     assert action["mensaje_nota"].startswith("[Resumen de documento] ")
 
 
-async def test_document_pdf_without_text_falls_back_to_vision(monkeypatch, tools):
+async def test_document_pdf_forces_flash_model_even_if_tool_overridden(monkeypatch, tools):
     from app import describe as describe_mod
-    monkeypatch.setattr(describe_mod, "_try_extract_pdf_text", lambda raw: "")
+    monkeypatch.setattr(describe_mod, "_try_extract_pdf_text", lambda raw: "Presupuesto N° 123. " * 20)
+    await tools.update("document", model="openai/gpt-4o")
 
     fake = FakeSpoterMulti()
     http, spoter = _wire(fake)
@@ -378,9 +374,54 @@ async def test_document_pdf_without_text_falls_back_to_vision(monkeypatch, tools
     chat_reqs = [r for r in fake.calls if r.url.path == "/api/v1/chat/completions"]
     assert len(chat_reqs) == 1
     body = json.loads(chat_reqs[0].content)
-    content = body["messages"][0]["content"]
-    # Sin texto extraíble, el content debe incluir el `file` con base64 del PDF.
-    assert any(part["type"] == "file" for part in content)
+    assert body["model"] == "google/gemini-2.5-flash"
+
+
+async def test_document_pdf_without_text_is_skipped(monkeypatch, tools):
+    from app import describe as describe_mod
+    monkeypatch.setattr(describe_mod, "_try_extract_pdf_text", lambda raw: "")
+
+    fake = FakeSpoterMulti()
+    http, spoter = _wire(fake)
+    payload = _payload_with({
+        "tipo": "document", "propio": 0, "fecha_hora": "2026-09-10T08:28:32",
+        "mensaje": "", "media_url": "https://hub.spoter.com.ar/file/99.pdf",
+    })
+
+    async with http:
+        await process_webhook(payload, http=http, spoter=spoter, config=_config(), tools=tools)
+
+    hit_hosts = {r.url.host for r in fake.calls}
+    assert "openrouter.ai" not in hit_hosts
+    assert fake.captured_mass_body is None
+
+
+async def test_document_non_pdf_is_skipped(tmp_path, tools):
+    from app.storage import RunStore
+
+    fake = FakeSpoterMulti()
+    fake.pdf_content_type = "text/plain"
+    fake.pdf_bytes = b"plain text"
+    http, spoter = _wire(fake)
+    store = RunStore(tmp_path / "runs.db")
+    await store.init()
+    payload = _payload_with({
+        "tipo": "document", "propio": 0, "fecha_hora": "2026-09-10T08:28:32",
+        "mensaje": "", "media_url": "https://hub.spoter.com.ar/file/nota.txt",
+    })
+
+    async with http:
+        await process_webhook(
+            payload, http=http, spoter=spoter, config=_config(), tools=tools, store=store,
+        )
+
+    hit_hosts = {r.url.host for r in fake.calls}
+    assert "openrouter.ai" not in hit_hosts
+    assert fake.captured_mass_body is None
+
+    rows = await store.list()
+    assert len(rows) == 1
+    assert rows[0].status == "skipped"
 
 
 async def test_token_from_payload_skips_login(tools):

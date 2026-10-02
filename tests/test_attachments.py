@@ -58,10 +58,22 @@ def test_returns_none_when_audio_has_no_media_url():
     assert result is None
 
 
-def test_extracts_image_from_client_as_stub_kind():
+def test_returns_none_when_tipo_is_image():
     result = extract_attachment(_payload(tipo="image", media_url="https://hub/img/1"))
 
-    assert result == Attachment(kind="image", url="https://hub/img/1", mensaje="")
+    assert result is None
+
+
+def test_returns_none_when_tipo_is_video():
+    result = extract_attachment(_payload(tipo="video", media_url="https://hub/video/1"))
+
+    assert result is None
+
+
+def test_returns_none_when_tipo_is_sticker():
+    result = extract_attachment(_payload(tipo="sticker", media_url="https://hub/sticker/1"))
+
+    assert result is None
 
 
 def test_extracts_document_from_client_as_stub_kind():
