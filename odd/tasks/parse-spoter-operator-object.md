@@ -28,4 +28,4 @@ Own audio and document notes use the emitting Spoter operator (`message.operacio
 - GREEN: focused provenance tests passed after extracting only `operacion.id_user`; malformed, missing, nested, empty, boolean, and list forms preserve fallback behavior.
 - Independent final verification: `.venv/Scripts/python.exe -m pytest -q` passed 174 tests.
 - Native reliability review approved and acknowledged for the implementation candidate: `review-0fe5d18196785d1a`.
-- Commit pending explicit user authorization.
+- Work-unit commit: `ac77396 fix(notes): parse nested Spoter operator IDs`.
