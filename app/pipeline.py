@@ -52,12 +52,12 @@ def _note_header(
     media = "Documento" if kind == "document" else "Audio"
     if propio:
         if operator_name:
-            return f"{media} enviado por {operator_name}"
+            return f"[{media} enviado por {operator_name}]"
         operator = f" {operacion}" if operacion else ""
-        return f"{media} enviado por Operador{operator}"
+        return f"[{media} enviado por Operador{operator}]"
     if contact_name:
-        return f"{media} recibido de {contact_name}"
-    return f"{media} recibido del cliente"
+        return f"[{media} recibido de {contact_name}]"
+    return f"[{media} recibido del cliente]"
 
 
 async def process_webhook(
