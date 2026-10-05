@@ -36,6 +36,21 @@ class _NoteBuild:
     duration_seconds: float | None = None
 
 
+def _source_label(propio: bool, operacion: str | None, contact_name: str) -> str:
+    """Etiqueta visible en la nota que identifica quién originó el media.
+
+    - propio: el operador emisor (si está disponible), si no `[Operador]`.
+    - entrante: el contacto/cliente, si no `[Cliente]`.
+    """
+    if propio:
+        if operacion:
+            return f"[Operador: {operacion}]"
+        return "[Operador]"
+    if contact_name:
+        return f"[Cliente: {contact_name}]"
+    return "[Cliente]"
+
+
 async def process_webhook(
     payload: SpoterWebhookPayload,
     *,
@@ -146,7 +161,15 @@ async def process_webhook(
     )
     name = contact.name if contact else ""
 
-    mensaje = f"{note.prefix} {note.text}".strip()
+    # Para media propio el operador emisor es el `id_user`; si no viene o es
+    # inválido, conservamos el usuario de servicio. `operacion` nunca se usa
+    # para media entrante.
+    id_user = config.service_user_id
+    if attachment.propio and attachment.operacion:
+        id_user = attachment.operacion
+
+    label = _source_label(attachment.propio, attachment.operacion, name)
+    mensaje = f"{label} {note.prefix} {note.text}".strip()
 
     try:
         id_original = await emit_agregar_nota(
@@ -156,8 +179,9 @@ async def process_webhook(
             sub_instance=target.instance,
             phone=target.phone,
             mensaje_nota=mensaje,
-            id_user=config.service_user_id,
+            id_user=id_user,
             nombre_sugerido=name,
+            id_orig_quote=attachment.id_original,
         )
     except SpoterAuthError as exc:
         await fail(f"spoter auth failed: {exc}")

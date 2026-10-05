@@ -100,3 +100,60 @@ def test_missing_mass_url_is_rejected():
 
     with pytest.raises(ValidationError):
         SpoterWebhookPayload.model_validate(body)
+
+
+def _with_message(**message_overrides):
+    body = {
+        **REAL_PAYLOAD,
+        "datos_instancias": {
+            **REAL_PAYLOAD["datos_instancias"],
+            "message": {
+                **REAL_PAYLOAD["datos_instancias"]["message"],
+                **message_overrides,
+            },
+        },
+    }
+    return SpoterWebhookPayload.model_validate(body)
+
+
+def test_message_carries_id_original_and_operacion():
+    payload = _with_message(id_original="a1b2c3", operacion="42")
+    message = payload.datos_instancias[0].message
+
+    assert message.id_original == "a1b2c3"
+    assert message.operacion == "42"
+
+
+def test_id_original_is_not_derived_from_message_id():
+    payload = _with_message(id="msg-999")
+    message = payload.datos_instancias[0].message
+
+    assert message.id_original is None
+
+
+def test_operacion_is_not_derived_from_message_id():
+    payload = _with_message(id="msg-999")
+    message = payload.datos_instancias[0].message
+
+    assert message.operacion is None
+
+
+def test_operacion_int_is_coerced_to_str():
+    payload = _with_message(operacion=42)
+    message = payload.datos_instancias[0].message
+
+    assert message.operacion == "42"
+
+
+def test_malformed_operacion_is_treated_as_absent():
+    for malformed in ([], {}, {"nested": True}):
+        payload = _with_message(operacion=malformed)
+        message = payload.datos_instancias[0].message
+        assert message.operacion is None
+
+
+def test_empty_operacion_is_treated_as_absent():
+    payload = _with_message(operacion="  ")
+    message = payload.datos_instancias[0].message
+
+    assert message.operacion is None

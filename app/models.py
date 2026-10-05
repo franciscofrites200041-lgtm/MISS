@@ -17,6 +17,22 @@ class MessageBody(BaseModel):
     fecha_hora: str | None = None
     mensaje: str | None = None
     media_url: str | None = None
+    id_original: str | None = None
+    operacion: str | None = None
+
+    @field_validator("id_original", "operacion", mode="before")
+    @classmethod
+    def _coerce_provenance(cls, v):
+        # Solo escalares simples cuentan como proveniencia; vacío o no-escalar
+        # (list/dict) se trata como ausente. Nunca derivamos de `id`.
+        if v is None:
+            return None
+        if isinstance(v, bool):
+            return None
+        if isinstance(v, (str, int)):
+            s = str(v).strip()
+            return s or None
+        return None
 
 
 class DatosInstancia(BaseModel):

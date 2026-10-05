@@ -99,12 +99,80 @@ async def test_happy_path_hits_every_stage_and_emits_correct_note(tools):
     assert fake.captured_mass_body is not None
     action = fake.captured_mass_body["actions"][0]
     assert action["codigo"] == "agregar_nota"
-    assert action["mensaje_nota"] == "[Transcripción de audio] hola necesito precio de lomos"
+    assert action["mensaje_nota"] == "[Cliente: Ale Del Pozo] [Transcripción de audio] hola necesito precio de lomos"
     assert action["numero_sugerido"] == "5492615617031"
     assert action["nombre_sugerido"] == "Ale Del Pozo"
     assert action["id_user"] == "1"
+    assert "id_orig_quote" not in action
     assert fake.captured_mass_body["instance"] == "95"
     assert fake.captured_mass_body["data"] == {"instance": "26434"}
+
+
+async def test_own_media_uses_operacion_as_id_user_and_identifies_operator(tools):
+    fake = FakeSpoter()
+    http, spoter = _wire(fake)
+    body = {**REAL_PAYLOAD}
+    body["datos_instancias"] = {
+        **REAL_PAYLOAD["datos_instancias"],
+        "message": {
+            **REAL_PAYLOAD["datos_instancias"]["message"],
+            "propio": 1,
+            "operacion": "42",
+            "id_original": "a1b2c3",
+        },
+    }
+    payload = SpoterWebhookPayload.model_validate(body)
+
+    async with http:
+        await process_webhook(payload, http=http, spoter=spoter, config=_config(), tools=tools)
+
+    action = fake.captured_mass_body["actions"][0]
+    assert action["id_user"] == "42"
+    assert action["mensaje_nota"] == "[Operador: 42] [Transcripción de audio] hola necesito precio de lomos"
+    assert action["id_orig_quote"] == "a1b2c3"
+
+
+async def test_own_media_without_operacion_retains_service_user_and_falls_back(tools):
+    fake = FakeSpoter()
+    http, spoter = _wire(fake)
+    body = {**REAL_PAYLOAD}
+    body["datos_instancias"] = {
+        **REAL_PAYLOAD["datos_instancias"],
+        "message": {
+            **REAL_PAYLOAD["datos_instancias"]["message"],
+            "propio": 1,
+        },
+    }
+    payload = SpoterWebhookPayload.model_validate(body)
+
+    async with http:
+        await process_webhook(payload, http=http, spoter=spoter, config=_config(), tools=tools)
+
+    action = fake.captured_mass_body["actions"][0]
+    assert action["id_user"] == "1"
+    assert action["mensaje_nota"] == "[Operador] [Transcripción de audio] hola necesito precio de lomos"
+
+
+async def test_inbound_ignores_operacion_for_id_user(tools):
+    fake = FakeSpoter()
+    http, spoter = _wire(fake)
+    body = {**REAL_PAYLOAD}
+    body["datos_instancias"] = {
+        **REAL_PAYLOAD["datos_instancias"],
+        "message": {
+            **REAL_PAYLOAD["datos_instancias"]["message"],
+            "propio": 0,
+            "operacion": "42",
+        },
+    }
+    payload = SpoterWebhookPayload.model_validate(body)
+
+    async with http:
+        await process_webhook(payload, http=http, spoter=spoter, config=_config(), tools=tools)
+
+    action = fake.captured_mass_body["actions"][0]
+    assert action["id_user"] == "1"
+    assert action["mensaje_nota"] == "[Cliente: Ale Del Pozo] [Transcripción de audio] hola necesito precio de lomos"
 
 
 async def test_emits_with_empty_name_when_contact_not_found(tools):
@@ -118,6 +186,8 @@ async def test_emits_with_empty_name_when_contact_not_found(tools):
 
     action = fake.captured_mass_body["actions"][0]
     assert "nombre_sugerido" not in action
+    assert action["id_user"] == "1"
+    assert action["mensaje_nota"] == "[Cliente] [Transcripción de audio] hola necesito precio de lomos"
 
 
 async def test_skips_when_no_audio_attachment(tools):
@@ -353,7 +423,7 @@ async def test_document_pdf_with_extractable_text_skips_vision(monkeypatch, tool
     assert all(part["type"] == "text" for part in content)
 
     action = fake.captured_mass_body["actions"][0]
-    assert action["mensaje_nota"].startswith("[Resumen de documento] ")
+    assert action["mensaje_nota"].startswith("[Cliente: Ale Del Pozo] [Resumen de documento] ")
 
 
 async def test_document_pdf_forces_flash_model_even_if_tool_overridden(monkeypatch, tools):

@@ -21,6 +21,7 @@ async def emit_agregar_nota(
     id_user: str,
     nombre_sugerido: str = "",
     origen: str = "miss",
+    id_orig_quote: str | None = None,
 ) -> str:
     """Emite la action `agregar_nota` contra `mass_url`. Devuelve el `id_original`
     (UUID) que Spoter usará para correlacionar cualquier feedback posterior.
@@ -42,6 +43,8 @@ async def emit_agregar_nota(
     }
     if nombre_sugerido:
         action["nombre_sugerido"] = nombre_sugerido
+    if id_orig_quote:
+        action["id_orig_quote"] = id_orig_quote
 
     body = {
         "instance": root_instance,

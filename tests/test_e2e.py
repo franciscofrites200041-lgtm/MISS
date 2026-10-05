@@ -92,10 +92,46 @@ def test_e2e_webhook_transcribes_and_emits_note(monkeypatch):
 
     action = body["actions"][0]
     assert action["codigo"] == "agregar_nota"
-    assert action["mensaje_nota"] == "[Transcripción de audio] hola necesito precio de lomos"
+    assert action["mensaje_nota"] == "[Cliente: Ale Del Pozo] [Transcripción de audio] hola necesito precio de lomos"
     assert action["nombre_sugerido"] == "Ale Del Pozo"
     assert action["id_user"] == "1"
     assert action["numero_sugerido"] == "5492615617031"
+    assert "id_orig_quote" not in action
+
+
+def test_e2e_own_media_attributes_operator_and_quote(monkeypatch):
+    monkeypatch.setenv("WEBHOOK_SECRET", "s3cret")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-fake")
+    monkeypatch.setenv("MISS_SERVICE_USER_ID", "1")
+    monkeypatch.setenv("MISS_NOTE_PREFIX", "[Transcripción de audio]")
+
+    fake = FakeSpoterUniverse()
+    body = {**REAL_PAYLOAD}
+    body["datos_instancias"] = {
+        **REAL_PAYLOAD["datos_instancias"],
+        "message": {
+            **REAL_PAYLOAD["datos_instancias"]["message"],
+            "propio": 1,
+            "operacion": "42",
+            "id_original": "a1b2c3",
+        },
+    }
+
+    with TestClient(app) as client:
+        _override_app_deps(fake)
+        response = client.post(
+            "/v1/spoter/webhook",
+            headers={"X-Webhook-Secret": "s3cret"},
+            json=body,
+        )
+
+    assert response.status_code == 202
+    assert fake.captured_mass is not None
+
+    action = fake.captured_mass["actions"][0]
+    assert action["id_user"] == "42"
+    assert action["mensaje_nota"] == "[Operador: 42] [Transcripción de audio] hola necesito precio de lomos"
+    assert action["id_orig_quote"] == "a1b2c3"
 
 
 def test_e2e_webhook_returns_202_even_when_pipeline_short_circuits(monkeypatch):

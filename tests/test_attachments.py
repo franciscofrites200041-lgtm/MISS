@@ -105,3 +105,29 @@ def test_ignores_audio_placeholder_string_in_mensaje():
 
     assert result is not None
     assert result.mensaje == ""
+
+
+def test_carries_provenance_fields():
+    result = extract_attachment(_payload(message={
+        "tipo": "audio",
+        "propio": 1,
+        "fecha_hora": "2026-09-10T08:28:32",
+        "mensaje": "",
+        "media_url": "https://hub.spoter.com.ar/audio/1753",
+        "id_original": "a1b2c3",
+        "operacion": "42",
+    }))
+
+    assert result is not None
+    assert result.propio is True
+    assert result.id_original == "a1b2c3"
+    assert result.operacion == "42"
+
+
+def test_inbound_attachment_has_no_provenance_by_default():
+    result = extract_attachment(_payload())
+
+    assert result is not None
+    assert result.propio is False
+    assert result.id_original is None
+    assert result.operacion is None

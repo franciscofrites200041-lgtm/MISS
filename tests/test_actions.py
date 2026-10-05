@@ -211,3 +211,39 @@ async def test_each_call_generates_unique_id_original():
     assert ids[0] != ids[1]
     UUID(ids[0])
     UUID(ids[1])
+
+
+async def test_adds_id_orig_quote_inside_action_when_supplied():
+    captured = {}
+
+    def handler(request):
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"success": True})
+
+    client, http = _make_client(handler)
+    async with http:
+        await emit_agregar_nota(
+            client, mass_url=MASS_URL, root_instance="95", sub_instance="26434",
+            phone="123", mensaje_nota="x", id_user="42", id_orig_quote="a1b2c3",
+        )
+
+    action = captured["body"]["actions"][0]
+    assert action["id_orig_quote"] == "a1b2c3"
+
+
+async def test_omits_id_orig_quote_when_absent():
+    captured = {}
+
+    def handler(request):
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"success": True})
+
+    client, http = _make_client(handler)
+    async with http:
+        await emit_agregar_nota(
+            client, mass_url=MASS_URL, root_instance="95", sub_instance="26434",
+            phone="123", mensaje_nota="x", id_user="42",
+        )
+
+    action = captured["body"]["actions"][0]
+    assert "id_orig_quote" not in action

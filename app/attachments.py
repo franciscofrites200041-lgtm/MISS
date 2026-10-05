@@ -11,6 +11,9 @@ class Attachment:
     kind: str
     url: str
     mensaje: str
+    propio: bool = False
+    operacion: str | None = None
+    id_original: str | None = None
 
 
 def extract_attachment(payload: SpoterWebhookPayload) -> Attachment | None:
@@ -29,4 +32,11 @@ def extract_attachment(payload: SpoterWebhookPayload) -> Attachment | None:
     if message.tipo == "audio" and mensaje == _AUDIO_PLACEHOLDER:
         mensaje = ""
 
-    return Attachment(kind=message.tipo, url=message.media_url, mensaje=mensaje)
+    return Attachment(
+        kind=message.tipo,
+        url=message.media_url,
+        mensaje=mensaje,
+        propio=message.propio is True,
+        operacion=message.operacion,
+        id_original=message.id_original,
+    )
