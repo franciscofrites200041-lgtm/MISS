@@ -9,7 +9,6 @@ export default function ToolEditor({ tool }: { tool: ToolDetail }) {
   const router = useRouter();
   const [enabled, setEnabled] = useState(tool.enabled);
   const [model, setModel] = useState(tool.model);
-  const [notePrefix, setNotePrefix] = useState(tool.note_prefix);
   const [prompt, setPrompt] = useState(tool.prompt ?? "");
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<
@@ -75,7 +74,6 @@ export default function ToolEditor({ tool }: { tool: ToolDetail }) {
   const saveAll = async () => {
     await patch({
       model,
-      note_prefix: notePrefix,
       prompt: tool.kind === "audio" ? null : prompt,
     });
   };
@@ -140,18 +138,6 @@ export default function ToolEditor({ tool }: { tool: ToolDetail }) {
               refresca cada pocos minutos.
             </p>
           )}
-        </div>
-
-        <div>
-          <label className="mb-1.5 block text-xs uppercase tracking-wide text-slate-500">
-            Prefijo de la nota
-          </label>
-          <input
-            type="text"
-            value={notePrefix}
-            onChange={(e) => setNotePrefix(e.target.value)}
-            className="w-full rounded-lg border border-white/5 bg-black/30 px-3 py-2 text-sm text-slate-100 focus:border-blue-500/50 focus:outline-none"
-          />
         </div>
 
         {tool.kind !== "audio" && (

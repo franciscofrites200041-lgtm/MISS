@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -17,11 +17,15 @@ CREATE TABLE IF NOT EXISTS tools (
     enabled INTEGER NOT NULL DEFAULT 1,
     model TEXT NOT NULL,
     prompt TEXT,
-    note_prefix TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS model_cache (
     kind TEXT PRIMARY KEY,
+    payload TEXT NOT NULL,
+    fetched_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS operator_cache (
+    instance TEXT PRIMARY KEY,
     payload TEXT NOT NULL,
     fetched_at TEXT NOT NULL
 );
@@ -44,7 +48,6 @@ SEED_TOOLS: list[dict] = [
         "enabled": 1,
         "model": "openai/whisper-large-v3-turbo",
         "prompt": None,
-        "note_prefix": "[Transcripción de audio]",
     },
     {
         "slug": "document",
@@ -54,7 +57,6 @@ SEED_TOOLS: list[dict] = [
         "enabled": 1,
         "model": "google/gemini-2.5-flash",
         "prompt": _DOCUMENT_PROMPT_DEFAULT,
-        "note_prefix": "[Resumen de documento]",
     },
 ]
 
@@ -68,8 +70,11 @@ class Tool:
     enabled: bool
     model: str
     prompt: str | None
-    note_prefix: str
     updated_at: str
+
+
+_TOOL_FIELDS = tuple(f.name for f in fields(Tool))
+_TOOL_SELECT = ", ".join(_TOOL_FIELDS)
 
 
 def _now() -> str:
@@ -77,7 +82,7 @@ def _now() -> str:
 
 
 def _row_to_tool(row) -> Tool:
-    d = dict(row)
+    d = {k: v for k, v in dict(row).items() if k in _TOOL_FIELDS}
     d["enabled"] = bool(d["enabled"])
     return Tool(**d)
 
@@ -99,9 +104,9 @@ class ToolsStore:
                 now = _now()
                 await db.executemany(
                     "INSERT INTO tools (slug, name, description, kind, enabled, model, "
-                    "prompt, note_prefix, updated_at) VALUES "
+                    "prompt, updated_at) VALUES "
                     "(:slug, :name, :description, :kind, :enabled, :model, "
-                    ":prompt, :note_prefix, :updated_at)",
+                    ":prompt, :updated_at)",
                     [{**t, "updated_at": now} for t in SEED_TOOLS],
                 )
                 await db.commit()
@@ -110,7 +115,7 @@ class ToolsStore:
         async with aiosqlite.connect(self.path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
-                "SELECT * FROM tools ORDER BY slug"
+                f"SELECT {_TOOL_SELECT} FROM tools ORDER BY slug"
             ) as cur:
                 rows = await cur.fetchall()
         return [_row_to_tool(r) for r in rows]
@@ -119,7 +124,7 @@ class ToolsStore:
         async with aiosqlite.connect(self.path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
-                "SELECT * FROM tools WHERE slug = ?", (slug,)
+                f"SELECT {_TOOL_SELECT} FROM tools WHERE slug = ?", (slug,)
             ) as cur:
                 row = await cur.fetchone()
         return _row_to_tool(row) if row else None
@@ -128,13 +133,13 @@ class ToolsStore:
         async with aiosqlite.connect(self.path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
-                "SELECT * FROM tools WHERE kind = ? LIMIT 1", (kind,)
+                f"SELECT {_TOOL_SELECT} FROM tools WHERE kind = ? LIMIT 1", (kind,)
             ) as cur:
                 row = await cur.fetchone()
         return _row_to_tool(row) if row else None
 
     async def update(self, slug: str, **fields) -> Tool | None:
-        allowed = {"name", "description", "enabled", "model", "prompt", "note_prefix"}
+        allowed = {"name", "description", "enabled", "model", "prompt"}
         clean = {k: v for k, v in fields.items() if k in allowed}
         if not clean:
             return await self.get(slug)
@@ -169,3 +174,35 @@ class ToolsStore:
             return json.loads(row["payload"])
         except (TypeError, ValueError):
             return None
+
+    async def save_operator_snapshot(
+        self, instance: str, operators: dict[str, str], *, fetched_at: datetime | None = None
+    ) -> None:
+        fetched = (fetched_at or datetime.now(timezone.utc)).isoformat()
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                "INSERT OR REPLACE INTO operator_cache (instance, payload, fetched_at) VALUES (?, ?, ?)",
+                (str(instance), json.dumps(operators, ensure_ascii=False), fetched),
+            )
+            await db.commit()
+
+    async def load_operator_snapshot(self, instance: str) -> tuple[dict[str, str] | None, datetime | None]:
+        async with aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT payload, fetched_at FROM operator_cache WHERE instance = ?", (str(instance),)
+            ) as cur:
+                row = await cur.fetchone()
+        if row is None:
+            return None, None
+        try:
+            payload = json.loads(row["payload"])
+            fetched_at = datetime.fromisoformat(row["fetched_at"])
+        except (TypeError, ValueError):
+            return None, None
+        if not isinstance(payload, dict):
+            return None, None
+        operators = {str(key): value for key, value in payload.items() if isinstance(value, str)}
+        if fetched_at.tzinfo is None:
+            fetched_at = fetched_at.replace(tzinfo=timezone.utc)
+        return operators, fetched_at

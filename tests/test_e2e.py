@@ -69,7 +69,6 @@ def test_e2e_webhook_transcribes_and_emits_note(monkeypatch):
     monkeypatch.setenv("WEBHOOK_SECRET", "s3cret")
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-fake")
     monkeypatch.setenv("MISS_SERVICE_USER_ID", "1")
-    monkeypatch.setenv("MISS_NOTE_PREFIX", "[Transcripción de audio]")
 
     fake = FakeSpoterUniverse()
 
@@ -92,7 +91,7 @@ def test_e2e_webhook_transcribes_and_emits_note(monkeypatch):
 
     action = body["actions"][0]
     assert action["codigo"] == "agregar_nota"
-    assert action["mensaje_nota"] == "[Cliente: Ale Del Pozo] [Transcripción de audio] hola necesito precio de lomos"
+    assert action["mensaje_nota"] == "Audio recibido de Ale Del Pozo\n\nhola necesito precio de lomos"
     assert action["nombre_sugerido"] == "Ale Del Pozo"
     assert action["id_user"] == "1"
     assert action["numero_sugerido"] == "5492615617031"
@@ -103,7 +102,6 @@ def test_e2e_own_media_attributes_operator_and_quote(monkeypatch):
     monkeypatch.setenv("WEBHOOK_SECRET", "s3cret")
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-fake")
     monkeypatch.setenv("MISS_SERVICE_USER_ID", "1")
-    monkeypatch.setenv("MISS_NOTE_PREFIX", "[Transcripción de audio]")
 
     fake = FakeSpoterUniverse()
     body = {**REAL_PAYLOAD}
@@ -130,7 +128,7 @@ def test_e2e_own_media_attributes_operator_and_quote(monkeypatch):
 
     action = fake.captured_mass["actions"][0]
     assert action["id_user"] == "42"
-    assert action["mensaje_nota"] == "[Operador: 42] [Transcripción de audio] hola necesito precio de lomos"
+    assert action["mensaje_nota"] == "Audio enviado por Operador 42\n\nhola necesito precio de lomos"
     assert action["id_orig_quote"] == "a1b2c3"
 
 
@@ -138,7 +136,6 @@ def test_e2e_own_media_object_operacion_attributes_operator(monkeypatch):
     monkeypatch.setenv("WEBHOOK_SECRET", "s3cret")
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-fake")
     monkeypatch.setenv("MISS_SERVICE_USER_ID", "1")
-    monkeypatch.setenv("MISS_NOTE_PREFIX", "[Transcripción de audio]")
 
     fake = FakeSpoterUniverse()
     body = {**REAL_PAYLOAD}
@@ -165,7 +162,7 @@ def test_e2e_own_media_object_operacion_attributes_operator(monkeypatch):
 
     action = fake.captured_mass["actions"][0]
     assert action["id_user"] == "10"
-    assert action["mensaje_nota"] == "[Operador: 10] [Transcripción de audio] hola necesito precio de lomos"
+    assert action["mensaje_nota"] == "Audio enviado por Operador 10\n\nhola necesito precio de lomos"
     assert action["id_orig_quote"] == "a1b2c3"
 
 

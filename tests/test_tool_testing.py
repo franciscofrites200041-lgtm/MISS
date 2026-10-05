@@ -125,7 +125,6 @@ def test_tool_test_image_tool_is_rejected_without_provider(monkeypatch):
             enabled=True,
             model="google/gemini-2.5-flash",
             prompt="p",
-            note_prefix="n",
             updated_at="2024-01-01T00:00:00+00:00",
         )
 

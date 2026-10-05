@@ -13,6 +13,7 @@ from app.attachments import extract_attachment
 from app.contacts import get_contact_by_phone
 from app.describe import DescriptionError, DescriptionSkip, describe_document
 from app.models import SpoterWebhookPayload
+from app.operators import OperatorDirectory
 from app.spoter import SpoterAuthError, SpoterClient
 from app.storage import RunStore
 from app.tools_store import Tool, ToolsStore
@@ -31,24 +32,32 @@ class PipelineConfig:
 @dataclass(frozen=True)
 class _NoteBuild:
     text: str
-    prefix: str
     cost_usd: float | None = None
     duration_seconds: float | None = None
 
 
-def _source_label(propio: bool, operacion: str | None, contact_name: str) -> str:
-    """Etiqueta visible en la nota que identifica quién originó el media.
+def _note_header(
+    propio: bool,
+    kind: str,
+    operacion: str | None,
+    contact_name: str,
+    operator_name: str | None = None,
+) -> str:
+    """Encabezado natural de la nota, según medio y procedencia.
 
-    - propio: el operador emisor (si está disponible), si no `[Operador]`.
-    - entrante: el contacto/cliente, si no `[Cliente]`.
+    - propio: `Documento/Audio enviado por <nombre>` o `Operador <id>`.
+    - entrante: `Documento/Audio recibido de <contacto>`, o `del cliente` si
+      no hay nombre de contacto disponible.
     """
+    media = "Documento" if kind == "document" else "Audio"
     if propio:
-        if operacion:
-            return f"[Operador: {operacion}]"
-        return "[Operador]"
+        if operator_name:
+            return f"{media} enviado por {operator_name}"
+        operator = f" {operacion}" if operacion else ""
+        return f"{media} enviado por Operador{operator}"
     if contact_name:
-        return f"[Cliente: {contact_name}]"
-    return "[Cliente]"
+        return f"{media} recibido de {contact_name}"
+    return f"{media} recibido del cliente"
 
 
 async def process_webhook(
@@ -64,7 +73,7 @@ async def process_webhook(
 ) -> None:
     """Orquesta el flujo de MISS: extraer adjunto -> dispatch a la tool por
     attachment.kind -> generar texto -> resolver contacto -> emitir agregar_nota.
-    La config de cada tool (modelo, prompt, prefijo, enabled) viene de ToolsStore.
+    La config de cada tool (modelo, prompt, enabled) viene de ToolsStore.
     Todas las fallas se logean; ninguna propaga."""
     target = payload.datos_instancias[0] if payload.datos_instancias else None
     run_id = None
@@ -152,14 +161,27 @@ async def process_webhook(
         payload_token[:8], len(payload_token), host, target.instance,
     )
     spoter.set_token(host, target.instance, payload_token)
+    # El directorio de operadores se consulta contra la instancia raíz.
+    spoter.set_token(host, payload.instance, payload_token)
 
-    contact = await get_contact_by_phone(
-        spoter,
-        mass_url=payload.mass_url,
-        instance=target.instance,
-        phone=target.phone,
-    )
-    name = contact.name if contact else ""
+    name = ""
+    if not attachment.propio:
+        contact = await get_contact_by_phone(
+            spoter,
+            mass_url=payload.mass_url,
+            instance=target.instance,
+            phone=target.phone,
+        )
+        name = contact.name if contact else ""
+
+    operator_name = None
+    if attachment.propio and attachment.operacion:
+        operator_name = await OperatorDirectory(tools).get_name(
+            spoter,
+            mass_url=payload.mass_url,
+            instance=payload.instance,
+            operator_id=attachment.operacion,
+        )
 
     # Para media propio el operador emisor es el `id_user`; si no viene o es
     # inválido, conservamos el usuario de servicio. `operacion` nunca se usa
@@ -168,8 +190,10 @@ async def process_webhook(
     if attachment.propio and attachment.operacion:
         id_user = attachment.operacion
 
-    label = _source_label(attachment.propio, attachment.operacion, name)
-    mensaje = f"{label} {note.prefix} {note.text}".strip()
+    header = _note_header(
+        attachment.propio, attachment.kind, attachment.operacion, name, operator_name
+    )
+    mensaje = f"{header}\n\n{note.text}".strip()
 
     try:
         id_original = await emit_agregar_nota(
@@ -220,7 +244,6 @@ async def _run_tool(
         )
         return _NoteBuild(
             text=transcription.text.strip(),
-            prefix=tool.note_prefix,
             cost_usd=transcription.cost_usd,
             duration_seconds=transcription.duration_seconds,
         )
@@ -230,6 +253,6 @@ async def _run_tool(
             prompt=tool.prompt or "",
         )
         return _NoteBuild(
-            text=description.text, prefix=tool.note_prefix, cost_usd=description.cost_usd,
+            text=description.text, cost_usd=description.cost_usd,
         )
     raise ValueError(f"kind no soportado: {tool.kind!r}")

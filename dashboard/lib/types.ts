@@ -70,7 +70,6 @@ export interface Tool {
   enabled: boolean;
   model: string;
   prompt: string | null;
-  note_prefix: string;
   updated_at: string;
 }
 
@@ -92,7 +91,6 @@ export interface ToolPatch {
   enabled?: boolean;
   model?: string;
   prompt?: string | null;
-  note_prefix?: string;
 }
 
 export interface LlmModel {

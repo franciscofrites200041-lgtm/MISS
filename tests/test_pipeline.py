@@ -45,6 +45,8 @@ class FakeSpoter:
         self.openrouter_status = 200
         self.contact_response = {"success": True, "data": {"nickname": "Ale Del Pozo"}}
         self.contact_status = 200
+        self.operators_response = {"success": True, "data": []}
+        self.operators_status = 200
         self.mass_response = {"success": True, "data": []}
         self.mass_status = 200
         self.captured_mass_body = None
@@ -57,6 +59,8 @@ class FakeSpoter:
         if u.host == "openrouter.ai":
             return httpx.Response(self.openrouter_status, json=self.openrouter_response)
         if u.path == "/hynts/getdata.json":
+            if u.params.get("entity") == "operadores":
+                return httpx.Response(self.operators_status, json=self.operators_response)
             return httpx.Response(self.contact_status, json=self.contact_response)
         if u.path == "/api/mass.json":
             self.captured_mass_body = json.loads(request.content)
@@ -99,7 +103,7 @@ async def test_happy_path_hits_every_stage_and_emits_correct_note(tools):
     assert fake.captured_mass_body is not None
     action = fake.captured_mass_body["actions"][0]
     assert action["codigo"] == "agregar_nota"
-    assert action["mensaje_nota"] == "[Cliente: Ale Del Pozo] [Transcripción de audio] hola necesito precio de lomos"
+    assert action["mensaje_nota"] == "Audio recibido de Ale Del Pozo\n\nhola necesito precio de lomos"
     assert action["numero_sugerido"] == "5492615617031"
     assert action["nombre_sugerido"] == "Ale Del Pozo"
     assert action["id_user"] == "1"
@@ -128,8 +132,37 @@ async def test_own_media_uses_operacion_as_id_user_and_identifies_operator(tools
 
     action = fake.captured_mass_body["actions"][0]
     assert action["id_user"] == "42"
-    assert action["mensaje_nota"] == "[Operador: 42] [Transcripción de audio] hola necesito precio de lomos"
+    assert action["mensaje_nota"] == "Audio enviado por Operador 42\n\nhola necesito precio de lomos"
     assert action["id_orig_quote"] == "a1b2c3"
+
+
+async def test_own_media_uses_cached_operator_name_in_header(tools):
+    fake = FakeSpoter()
+    fake.operators_response = {"success": True, "data": [{"id": "42", "nombre": "María Pérez"}]}
+    http, spoter = _wire(fake)
+    body = {**REAL_PAYLOAD}
+    body["datos_instancias"] = {
+        **REAL_PAYLOAD["datos_instancias"],
+        "message": {
+            **REAL_PAYLOAD["datos_instancias"]["message"],
+            "propio": 1,
+            "operacion": "42",
+        },
+    }
+
+    async with http:
+        await process_webhook(
+            SpoterWebhookPayload.model_validate(body),
+            http=http,
+            spoter=spoter,
+            config=_config(),
+            tools=tools,
+        )
+
+    action = fake.captured_mass_body["actions"][0]
+    assert action["mensaje_nota"] == "Audio enviado por María Pérez\n\nhola necesito precio de lomos"
+    operator_requests = [r for r in fake.calls if r.url.params.get("entity") == "operadores"]
+    assert len(operator_requests) == 1
 
 
 async def test_own_media_uses_object_operacion_id_user(tools):
@@ -152,7 +185,7 @@ async def test_own_media_uses_object_operacion_id_user(tools):
 
     action = fake.captured_mass_body["actions"][0]
     assert action["id_user"] == "10"
-    assert action["mensaje_nota"] == "[Operador: 10] [Transcripción de audio] hola necesito precio de lomos"
+    assert action["mensaje_nota"] == "Audio enviado por Operador 10\n\nhola necesito precio de lomos"
     assert action["id_orig_quote"] == "a1b2c3"
 
 
@@ -176,7 +209,7 @@ async def test_own_media_with_object_operacion_missing_id_user_falls_back(tools)
 
     action = fake.captured_mass_body["actions"][0]
     assert action["id_user"] == "1"
-    assert action["mensaje_nota"] == "[Operador] [Transcripción de audio] hola necesito precio de lomos"
+    assert action["mensaje_nota"] == "Audio enviado por Operador\n\nhola necesito precio de lomos"
     assert action["id_orig_quote"] == "a1b2c3"
 
 
@@ -198,7 +231,7 @@ async def test_own_media_without_operacion_retains_service_user_and_falls_back(t
 
     action = fake.captured_mass_body["actions"][0]
     assert action["id_user"] == "1"
-    assert action["mensaje_nota"] == "[Operador] [Transcripción de audio] hola necesito precio de lomos"
+    assert action["mensaje_nota"] == "Audio enviado por Operador\n\nhola necesito precio de lomos"
 
 
 async def test_inbound_ignores_operacion_for_id_user(tools):
@@ -220,7 +253,7 @@ async def test_inbound_ignores_operacion_for_id_user(tools):
 
     action = fake.captured_mass_body["actions"][0]
     assert action["id_user"] == "1"
-    assert action["mensaje_nota"] == "[Cliente: Ale Del Pozo] [Transcripción de audio] hola necesito precio de lomos"
+    assert action["mensaje_nota"] == "Audio recibido de Ale Del Pozo\n\nhola necesito precio de lomos"
 
 
 async def test_inbound_ignores_object_operacion_id_user(tools):
@@ -242,7 +275,7 @@ async def test_inbound_ignores_object_operacion_id_user(tools):
 
     action = fake.captured_mass_body["actions"][0]
     assert action["id_user"] == "1"
-    assert action["mensaje_nota"] == "[Cliente: Ale Del Pozo] [Transcripción de audio] hola necesito precio de lomos"
+    assert action["mensaje_nota"] == "Audio recibido de Ale Del Pozo\n\nhola necesito precio de lomos"
 
 
 async def test_emits_with_empty_name_when_contact_not_found(tools):
@@ -257,7 +290,7 @@ async def test_emits_with_empty_name_when_contact_not_found(tools):
     action = fake.captured_mass_body["actions"][0]
     assert "nombre_sugerido" not in action
     assert action["id_user"] == "1"
-    assert action["mensaje_nota"] == "[Cliente] [Transcripción de audio] hola necesito precio de lomos"
+    assert action["mensaje_nota"] == "Audio recibido del cliente\n\nhola necesito precio de lomos"
 
 
 async def test_skips_when_no_audio_attachment(tools):
@@ -493,7 +526,48 @@ async def test_document_pdf_with_extractable_text_skips_vision(monkeypatch, tool
     assert all(part["type"] == "text" for part in content)
 
     action = fake.captured_mass_body["actions"][0]
-    assert action["mensaje_nota"].startswith("[Cliente: Ale Del Pozo] [Resumen de documento] ")
+    assert action["mensaje_nota"] == "Documento recibido de Ale Del Pozo\n\nPresupuesto por $50.000 firmado el 10/09/2026."
+
+
+async def test_own_document_renders_natural_operator_header(monkeypatch, tools):
+    from app import describe as describe_mod
+    monkeypatch.setattr(describe_mod, "_try_extract_pdf_text", lambda raw: "Presupuesto N° 123 por $50.000 emitido el 10/09/2026. " * 20)
+
+    fake = FakeSpoterMulti()
+    http, spoter = _wire(fake)
+    payload = _payload_with({
+        "tipo": "document", "propio": 1, "fecha_hora": "2026-09-10T08:28:32",
+        "mensaje": "", "media_url": "https://hub.spoter.com.ar/file/99.pdf",
+        "operacion": "42",
+        "id_original": "a1b2c3",
+    })
+
+    async with http:
+        await process_webhook(payload, http=http, spoter=spoter, config=_config(), tools=tools)
+
+    action = fake.captured_mass_body["actions"][0]
+    assert action["id_user"] == "42"
+    assert action["mensaje_nota"] == "Documento enviado por Operador 42\n\nPresupuesto por $50.000 firmado el 10/09/2026."
+    assert action["id_orig_quote"] == "a1b2c3"
+
+
+async def test_inbound_document_without_contact_uses_generic_header(monkeypatch, tools):
+    from app import describe as describe_mod
+    monkeypatch.setattr(describe_mod, "_try_extract_pdf_text", lambda raw: "Presupuesto N° 123 por $50.000 emitido el 10/09/2026. " * 20)
+
+    fake = FakeSpoterMulti()
+    fake.contact_response = {"success": True, "data": {}}
+    http, spoter = _wire(fake)
+    payload = _payload_with({
+        "tipo": "document", "propio": 0, "fecha_hora": "2026-09-10T08:28:32",
+        "mensaje": "", "media_url": "https://hub.spoter.com.ar/file/99.pdf",
+    })
+
+    async with http:
+        await process_webhook(payload, http=http, spoter=spoter, config=_config(), tools=tools)
+
+    action = fake.captured_mass_body["actions"][0]
+    assert action["mensaje_nota"] == "Documento recibido del cliente\n\nPresupuesto por $50.000 firmado el 10/09/2026."
 
 
 async def test_document_pdf_forces_flash_model_even_if_tool_overridden(monkeypatch, tools):
