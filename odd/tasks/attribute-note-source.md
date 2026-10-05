@@ -31,4 +31,4 @@ Every audio or document note preserves its original Spoter quote identifier and 
 - GREEN: the same focused suite passed 60 tests after implementation.
 - Independent verification: `.venv/Scripts/python.exe -m pytest -q` passed 161 tests; the verifier confirmed `message.id` never enters the quote-ID chain and that inbound media cannot select `message.operacion` as `id_user`.
 - Native reliability review approved and acknowledged for the implementation candidate: `review-3daaf6b5e1f74d20`.
-- Commit pending explicit user authorization.
+- Work-unit commit: `a414aa8 feat(notes): attribute media to senders`.
