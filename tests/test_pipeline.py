@@ -132,6 +132,54 @@ async def test_own_media_uses_operacion_as_id_user_and_identifies_operator(tools
     assert action["id_orig_quote"] == "a1b2c3"
 
 
+async def test_own_media_uses_object_operacion_id_user(tools):
+    fake = FakeSpoter()
+    http, spoter = _wire(fake)
+    body = {**REAL_PAYLOAD}
+    body["datos_instancias"] = {
+        **REAL_PAYLOAD["datos_instancias"],
+        "message": {
+            **REAL_PAYLOAD["datos_instancias"]["message"],
+            "propio": 1,
+            "operacion": {"id_user": 10, "usa_faq": True},
+            "id_original": "a1b2c3",
+        },
+    }
+    payload = SpoterWebhookPayload.model_validate(body)
+
+    async with http:
+        await process_webhook(payload, http=http, spoter=spoter, config=_config(), tools=tools)
+
+    action = fake.captured_mass_body["actions"][0]
+    assert action["id_user"] == "10"
+    assert action["mensaje_nota"] == "[Operador: 10] [Transcripción de audio] hola necesito precio de lomos"
+    assert action["id_orig_quote"] == "a1b2c3"
+
+
+async def test_own_media_with_object_operacion_missing_id_user_falls_back(tools):
+    fake = FakeSpoter()
+    http, spoter = _wire(fake)
+    body = {**REAL_PAYLOAD}
+    body["datos_instancias"] = {
+        **REAL_PAYLOAD["datos_instancias"],
+        "message": {
+            **REAL_PAYLOAD["datos_instancias"]["message"],
+            "propio": 1,
+            "operacion": {"usa_faq": True},
+            "id_original": "a1b2c3",
+        },
+    }
+    payload = SpoterWebhookPayload.model_validate(body)
+
+    async with http:
+        await process_webhook(payload, http=http, spoter=spoter, config=_config(), tools=tools)
+
+    action = fake.captured_mass_body["actions"][0]
+    assert action["id_user"] == "1"
+    assert action["mensaje_nota"] == "[Operador] [Transcripción de audio] hola necesito precio de lomos"
+    assert action["id_orig_quote"] == "a1b2c3"
+
+
 async def test_own_media_without_operacion_retains_service_user_and_falls_back(tools):
     fake = FakeSpoter()
     http, spoter = _wire(fake)
@@ -163,6 +211,28 @@ async def test_inbound_ignores_operacion_for_id_user(tools):
             **REAL_PAYLOAD["datos_instancias"]["message"],
             "propio": 0,
             "operacion": "42",
+        },
+    }
+    payload = SpoterWebhookPayload.model_validate(body)
+
+    async with http:
+        await process_webhook(payload, http=http, spoter=spoter, config=_config(), tools=tools)
+
+    action = fake.captured_mass_body["actions"][0]
+    assert action["id_user"] == "1"
+    assert action["mensaje_nota"] == "[Cliente: Ale Del Pozo] [Transcripción de audio] hola necesito precio de lomos"
+
+
+async def test_inbound_ignores_object_operacion_id_user(tools):
+    fake = FakeSpoter()
+    http, spoter = _wire(fake)
+    body = {**REAL_PAYLOAD}
+    body["datos_instancias"] = {
+        **REAL_PAYLOAD["datos_instancias"],
+        "message": {
+            **REAL_PAYLOAD["datos_instancias"]["message"],
+            "propio": 0,
+            "operacion": {"id_user": 10, "usa_faq": True},
         },
     }
     payload = SpoterWebhookPayload.model_validate(body)

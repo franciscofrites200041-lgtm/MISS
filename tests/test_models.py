@@ -157,3 +157,61 @@ def test_empty_operacion_is_treated_as_absent():
     message = payload.datos_instancias[0].message
 
     assert message.operacion is None
+
+
+def test_operacion_object_extracts_id_user():
+    payload = _with_message(
+        operacion={"id_user": 10, "usa_faq": True, "puesto": "ops"}
+    )
+    message = payload.datos_instancias[0].message
+
+    assert message.operacion == "10"
+
+
+def test_operacion_object_extracts_string_id_user():
+    payload = _with_message(operacion={"id_user": "10"})
+    message = payload.datos_instancias[0].message
+
+    assert message.operacion == "10"
+
+
+def test_operacion_object_with_missing_id_user_is_absent():
+    payload = _with_message(operacion={"usa_faq": True})
+    message = payload.datos_instancias[0].message
+
+    assert message.operacion is None
+
+
+def test_operacion_object_with_empty_object_is_absent():
+    payload = _with_message(operacion={})
+    message = payload.datos_instancias[0].message
+
+    assert message.operacion is None
+
+
+def test_operacion_object_rejects_boolean_id_user():
+    payload = _with_message(operacion={"id_user": True})
+    message = payload.datos_instancias[0].message
+
+    assert message.operacion is None
+
+
+def test_operacion_object_rejects_list_id_user():
+    payload = _with_message(operacion={"id_user": [10]})
+    message = payload.datos_instancias[0].message
+
+    assert message.operacion is None
+
+
+def test_operacion_object_rejects_nested_object_id_user():
+    payload = _with_message(operacion={"id_user": {"nested": True}})
+    message = payload.datos_instancias[0].message
+
+    assert message.operacion is None
+
+
+def test_operacion_object_rejects_empty_id_user():
+    for empty in ("", "   "):
+        payload = _with_message(operacion={"id_user": empty})
+        message = payload.datos_instancias[0].message
+        assert message.operacion is None

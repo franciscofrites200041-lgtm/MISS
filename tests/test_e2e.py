@@ -134,6 +134,41 @@ def test_e2e_own_media_attributes_operator_and_quote(monkeypatch):
     assert action["id_orig_quote"] == "a1b2c3"
 
 
+def test_e2e_own_media_object_operacion_attributes_operator(monkeypatch):
+    monkeypatch.setenv("WEBHOOK_SECRET", "s3cret")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-fake")
+    monkeypatch.setenv("MISS_SERVICE_USER_ID", "1")
+    monkeypatch.setenv("MISS_NOTE_PREFIX", "[Transcripción de audio]")
+
+    fake = FakeSpoterUniverse()
+    body = {**REAL_PAYLOAD}
+    body["datos_instancias"] = {
+        **REAL_PAYLOAD["datos_instancias"],
+        "message": {
+            **REAL_PAYLOAD["datos_instancias"]["message"],
+            "propio": 1,
+            "operacion": {"id_user": 10, "usa_faq": True},
+            "id_original": "a1b2c3",
+        },
+    }
+
+    with TestClient(app) as client:
+        _override_app_deps(fake)
+        response = client.post(
+            "/v1/spoter/webhook",
+            headers={"X-Webhook-Secret": "s3cret"},
+            json=body,
+        )
+
+    assert response.status_code == 202
+    assert fake.captured_mass is not None
+
+    action = fake.captured_mass["actions"][0]
+    assert action["id_user"] == "10"
+    assert action["mensaje_nota"] == "[Operador: 10] [Transcripción de audio] hola necesito precio de lomos"
+    assert action["id_orig_quote"] == "a1b2c3"
+
+
 def test_e2e_webhook_returns_202_even_when_pipeline_short_circuits(monkeypatch):
     """Si el payload no tiene audio de cliente, el webhook igual responde 202
     (Spoter no debe recibir un error por eventos que no aplican)."""

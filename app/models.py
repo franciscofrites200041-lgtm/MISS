@@ -9,6 +9,19 @@ def _coerce_str(value):
     return str(value)
 
 
+def _normalize_provenance(value):
+    # Solo escalares simples cuentan como proveniencia; vacío o no-escalar
+    # (bool/list/dict) se trata como ausente. Nunca derivamos de `id`.
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (str, int)):
+        s = str(value).strip()
+        return s or None
+    return None
+
+
 class MessageBody(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -20,19 +33,20 @@ class MessageBody(BaseModel):
     id_original: str | None = None
     operacion: str | None = None
 
-    @field_validator("id_original", "operacion", mode="before")
+    @field_validator("id_original", mode="before")
     @classmethod
-    def _coerce_provenance(cls, v):
-        # Solo escalares simples cuentan como proveniencia; vacío o no-escalar
-        # (list/dict) se trata como ausente. Nunca derivamos de `id`.
-        if v is None:
-            return None
-        if isinstance(v, bool):
-            return None
-        if isinstance(v, (str, int)):
-            s = str(v).strip()
-            return s or None
-        return None
+    def _coerce_id_original(cls, v):
+        return _normalize_provenance(v)
+
+    @field_validator("operacion", mode="before")
+    @classmethod
+    def _coerce_operacion(cls, v):
+        # Spoter envía `operacion` como objeto ({id_user, usa_faq, ...}).
+        # El operador es únicamente `operacion.id_user`; el resto se ignora.
+        # También conservamos compatibilidad con el escalar directo.
+        if isinstance(v, dict):
+            v = v.get("id_user")
+        return _normalize_provenance(v)
 
 
 class DatosInstancia(BaseModel):

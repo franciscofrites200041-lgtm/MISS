@@ -124,6 +124,22 @@ def test_carries_provenance_fields():
     assert result.operacion == "42"
 
 
+def test_carries_operacion_object_id_user():
+    result = extract_attachment(_payload(message={
+        "tipo": "audio",
+        "propio": 1,
+        "fecha_hora": "2026-09-10T08:28:32",
+        "mensaje": "",
+        "media_url": "https://hub.spoter.com.ar/audio/1753",
+        "id_original": "a1b2c3",
+        "operacion": {"id_user": 10, "usa_faq": True},
+    }))
+
+    assert result is not None
+    assert result.id_original == "a1b2c3"
+    assert result.operacion == "10"
+
+
 def test_inbound_attachment_has_no_provenance_by_default():
     result = extract_attachment(_payload())
 
